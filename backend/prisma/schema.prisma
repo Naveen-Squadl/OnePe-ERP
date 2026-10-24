@@ -1,0 +1,546 @@
+// OnePe POS ERP – multi-tenant POS / inventory schema.
+// Every tenant-owned row carries shopId; branch-scoped rows also carry branchId.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  MANAGER
+  CASHIER
+  SALESMAN
+  BILLER
+  STORE_KEEPER
+  STOCK_MANAGER
+}
+
+enum ShopType {
+  BAKERY
+  RETAIL
+  DISTRIBUTOR
+  PARKING
+  LOGISTICS
+}
+
+enum Plan {
+  FREE
+  BASIC
+  STANDARD
+  PREMIUM
+  ENTERPRISE
+}
+
+enum BillKind {
+  SALE
+  EXPENSE
+}
+
+enum BillStatus {
+  WAITING
+  COMPLETED
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  CARD
+  CREDIT
+  SPLIT
+  BANK
+  CHEQUE
+}
+
+enum PurchaseStatus {
+  PENDING
+  RECEIVED
+}
+
+enum BranchScope {
+  ALL
+  SPECIFIC
+}
+
+enum EnquiryStatus {
+  NEW
+  CONTACTED
+  CLOSED
+}
+
+model Shop {
+  id                 String    @id @default(uuid())
+  name               String
+  ownerName          String?
+  ownerEmail         String
+  address            String?
+  contactNumber      String?
+  gstNumber          String?
+  upiId              String?
+  logoUrl            String?
+  thanksNote         String?   @default("Thank you for visiting!")
+  shopType           ShopType  @default(RETAIL)
+  isActive           Boolean   @default(true)
+  plan               Plan      @default(BASIC)
+  maxUsers           Int       @default(4)
+  maxBranches        Int       @default(1)
+  subscriptionStart  DateTime  @default(now())
+  subscriptionExpiry DateTime?
+  /// Free-form shop settings (printer, loyalty, KOT, price option, storage locations ...). Validated in code.
+  settings           Json      @default("{}")
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  branches       Branch[]
+  users          User[]
+  categories     Category[]
+  products       Product[]
+  customers      Customer[]
+  suppliers      Supplier[]
+  bills          Bill[]
+  purchases      Purchase[]
+  stockBatches   StockBatch[]
+  stockMovements StockMovement[]
+  activityLogs   ActivityLog[]
+  payments       CustomerPayment[]
+  supplierPays   SupplierPayment[]
+  returnNotes    ReturnNote[]
+  sequences      Sequence[]
+}
+
+model Branch {
+  id            String   @id @default(uuid())
+  shopId        String
+  name          String
+  code          String
+  address       String?
+  contactNumber String?
+  upiId         String?
+  tableNames    String[] @default([])
+  /// Branch-level printer / KOT overrides.
+  printer       Json     @default("{}")
+  isMain        Boolean  @default(false)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  shop            Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  users           User[]
+  productBranches ProductBranch[]
+  bills           Bill[]
+
+  @@unique([shopId, code])
+  @@index([shopId])
+}
+
+model User {
+  id           String    @id @default(uuid())
+  shopId       String?
+  branchId     String?
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         Role
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  shop   Shop?   @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  branch Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  @@index([shopId])
+}
+
+model Category {
+  id                String   @id @default(uuid())
+  shopId            String
+  name              String
+  isStockCategory   Boolean  @default(true)
+  isExpenseCategory Boolean  @default(false)
+  sortOrder         Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  shop     Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@unique([shopId, name])
+}
+
+model Product {
+  id                String      @id @default(uuid())
+  shopId            String
+  categoryId        String?
+  name              String
+  barcode           String?
+  hsnCode           String?
+  unit              String      @default("pcs")
+  basePrice         Decimal     @db.Decimal(12, 2)
+  maxPrice          Decimal?    @db.Decimal(12, 2)
+  purchasePrice     Decimal?    @db.Decimal(12, 2)
+  gstPercent        Decimal     @default(0) @db.Decimal(5, 2)
+  isIgst            Boolean     @default(false)
+  isPriceVariable   Boolean     @default(false)
+  trackStock        Boolean     @default(true)
+  lowStockThreshold Decimal     @default(5) @db.Decimal(12, 3)
+  storageLocation   String?
+  imageUrl          String?
+  branchScope       BranchScope @default(ALL)
+  isActive          Boolean     @default(true)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  shop     Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  category Category?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  branches ProductBranch[]
+  batches  StockBatch[]
+
+  @@unique([shopId, barcode])
+  @@index([shopId, name])
+}
+
+/// Per-branch availability, price override and stock for a product.
+model ProductBranch {
+  productId String
+  branchId  String
+  price     Decimal? @db.Decimal(12, 2)
+  stock     Decimal  @default(0) @db.Decimal(12, 3)
+  enabled   Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([productId, branchId])
+  @@index([branchId])
+}
+
+model Customer {
+  id             String   @id @default(uuid())
+  shopId         String
+  name           String
+  phone          String?
+  address        String?
+  gstin          String?
+  openingBalance Decimal  @default(0) @db.Decimal(12, 2)
+  /// Positive = customer owes the shop; negative = advance credit.
+  currentBalance Decimal  @default(0) @db.Decimal(12, 2)
+  loyaltyPoints  Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  shop     Shop              @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  bills    Bill[]
+  payments CustomerPayment[]
+  prices   CustomerPrice[]
+
+  @@unique([shopId, phone])
+  @@index([shopId, name])
+}
+
+/// Last price a customer paid for a product (powers the "Last price" option).
+model CustomerPrice {
+  customerId String
+  productId  String
+  lastPrice  Decimal  @db.Decimal(12, 2)
+  updatedAt  DateTime @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@id([customerId, productId])
+}
+
+model CustomerPayment {
+  id         String        @id @default(uuid())
+  shopId     String
+  branchId   String?
+  customerId String
+  receiptNo  String
+  amount     Decimal       @db.Decimal(12, 2)
+  method     PaymentMethod @default(CASH)
+  note       String?
+  userId     String?
+  userName   String?
+  createdAt  DateTime      @default(now())
+
+  shop     Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, customerId])
+}
+
+model Supplier {
+  id             String   @id @default(uuid())
+  shopId         String
+  name           String
+  phone          String?
+  address        String?
+  gstin          String?
+  openingBalance Decimal  @default(0) @db.Decimal(12, 2)
+  /// Amount the shop owes the supplier.
+  currentBalance Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  shop      Shop              @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  purchases Purchase[]
+  payments  SupplierPayment[]
+
+  @@index([shopId, name])
+}
+
+model SupplierPayment {
+  id         String        @id @default(uuid())
+  shopId     String
+  supplierId String
+  amount     Decimal       @db.Decimal(12, 2)
+  method     PaymentMethod @default(CASH)
+  note       String?
+  userId     String?
+  createdAt  DateTime      @default(now())
+
+  shop     Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+}
+
+model Bill {
+  /// Client-generated UUID so offline devices can push idempotently.
+  id                    String        @id
+  shopId                String
+  branchId              String
+  billNo                String
+  kind                  BillKind      @default(SALE)
+  status                BillStatus    @default(COMPLETED)
+  tableName             String?
+  customerId            String?
+  customerName          String?
+  customerContact       String?
+  subtotal              Decimal       @default(0) @db.Decimal(12, 2)
+  totalGst              Decimal       @default(0) @db.Decimal(12, 2)
+  itemDiscount          Decimal       @default(0) @db.Decimal(12, 2)
+  discount              Decimal       @default(0) @db.Decimal(12, 2)
+  loyaltyPointsRedeemed Decimal       @default(0) @db.Decimal(12, 2)
+  loyaltyPointsEarned   Decimal       @default(0) @db.Decimal(12, 2)
+  totalAmount           Decimal       @default(0) @db.Decimal(12, 2)
+  receivedAmount        Decimal       @default(0) @db.Decimal(12, 2)
+  /// Change returned (if paid more) – customer balance changes are captured below.
+  changeAmount          Decimal       @default(0) @db.Decimal(12, 2)
+  paymentMethod         PaymentMethod @default(CASH)
+  cashAmount            Decimal       @default(0) @db.Decimal(12, 2)
+  upiAmount             Decimal       @default(0) @db.Decimal(12, 2)
+  cardAmount            Decimal       @default(0) @db.Decimal(12, 2)
+  customerOpeningBal    Decimal?      @db.Decimal(12, 2)
+  customerClosingBal    Decimal?      @db.Decimal(12, 2)
+  note                  String?
+  userId                String?
+  userName              String?
+  billDate              DateTime      @default(now())
+  isCancelled           Boolean       @default(false)
+  cancelledByUserId     String?
+  cancelledByUserName   String?
+  cancelledAt           DateTime?
+  isDeleted             Boolean       @default(false)
+  deletedByUserId       String?
+  deletedByUserName     String?
+  deletedAt             DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  shop     Shop       @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  branch   Branch     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  customer Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items    BillItem[]
+
+  @@unique([shopId, billNo])
+  @@index([shopId, branchId, billDate])
+  @@index([shopId, updatedAt])
+}
+
+model BillItem {
+  id                 String   @id @default(uuid())
+  billId             String
+  productId          String?
+  productName        String
+  categoryId         String?
+  hsnCode            String?
+  quantity           Decimal  @db.Decimal(12, 3)
+  originalPrice      Decimal  @db.Decimal(12, 2)
+  soldPrice          Decimal  @db.Decimal(12, 2)
+  /// base | last | max | custom
+  priceType          String   @default("base")
+  discount           Decimal  @default(0) @db.Decimal(12, 2)
+  gstPercent         Decimal  @default(0) @db.Decimal(5, 2)
+  isIgst             Boolean  @default(false)
+  taxableAmount      Decimal  @default(0) @db.Decimal(12, 2)
+  gstAmount          Decimal  @default(0) @db.Decimal(12, 2)
+  lineTotal          Decimal  @default(0) @db.Decimal(12, 2)
+  note               String?
+  kotPrintedQuantity Decimal  @default(0) @db.Decimal(12, 3)
+  /// [{batchId, qty}] consumed FIFO at checkout, so reversals restore the exact batches.
+  batchAllocations   Json?
+
+  bill Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
+
+  @@index([billId])
+  @@index([productId])
+}
+
+model StockBatch {
+  id                String    @id @default(uuid())
+  shopId            String
+  branchId          String
+  productId         String
+  batchNumber       String
+  inwardQuantity    Decimal   @db.Decimal(12, 3)
+  remainingQuantity Decimal   @db.Decimal(12, 3)
+  purchasePrice     Decimal?  @db.Decimal(12, 2)
+  expiryDate        DateTime?
+  location          String?
+  purchaseId        String?
+  notes             String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  shop    Shop    @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, branchId, productId])
+}
+
+/// Immutable stock ledger (stock_history in the original app).
+model StockMovement {
+  id           String   @id @default(uuid())
+  shopId       String
+  branchId     String
+  productId    String
+  productName  String
+  /// sale | sale_reversal | purchase_inward | manual_add | manual_outward | manual_correction | return_good | return_damage | return_old_stock
+  type         String
+  quantity     Decimal  @db.Decimal(12, 3)
+  balanceAfter Decimal  @db.Decimal(12, 3)
+  refType      String?
+  refId        String?
+  note         String?
+  userId       String?
+  userName     String?
+  createdAt    DateTime @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, branchId, createdAt])
+  @@index([productId])
+}
+
+model Purchase {
+  id             String         @id @default(uuid())
+  shopId         String
+  branchId       String
+  supplierId     String?
+  supplierName   String?
+  invoiceNumber  String
+  invoiceDate    DateTime       @default(now())
+  status         PurchaseStatus @default(RECEIVED)
+  grossAmount    Decimal        @default(0) @db.Decimal(12, 2)
+  discountAmount Decimal        @default(0) @db.Decimal(12, 2)
+  gstAmount      Decimal        @default(0) @db.Decimal(12, 2)
+  totalAmount    Decimal        @default(0) @db.Decimal(12, 2)
+  amountPaid     Decimal        @default(0) @db.Decimal(12, 2)
+  balanceDue     Decimal        @default(0) @db.Decimal(12, 2)
+  paymentMode    PaymentMethod  @default(CASH)
+  location       String?
+  notes          String?
+  userId         String?
+  userName       String?
+  receivedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  shop     Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  supplier Supplier?      @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  items    PurchaseItem[]
+
+  @@index([shopId, invoiceDate])
+}
+
+model PurchaseItem {
+  id          String    @id @default(uuid())
+  purchaseId  String
+  productId   String
+  productName String
+  hsnCode     String?
+  quantity    Decimal   @db.Decimal(12, 3)
+  unitPrice   Decimal   @db.Decimal(12, 2)
+  gstPercent  Decimal   @default(0) @db.Decimal(5, 2)
+  total       Decimal   @db.Decimal(12, 2)
+  batchNumber String?
+  expiryDate  DateTime?
+
+  purchase Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+}
+
+model ReturnNote {
+  id          String   @id @default(uuid())
+  shopId      String
+  branchId    String
+  returnNo    String
+  customerId  String?
+  billId      String?
+  /// good | damaged | old_stock
+  condition   String
+  /// cash_refund | account_credit
+  settlement  String
+  totalAmount Decimal  @db.Decimal(12, 2)
+  /// [{productId, productName, quantity, price}]
+  items       Json
+  userId      String?
+  userName    String?
+  createdAt   DateTime @default(now())
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, returnNo])
+}
+
+model ActivityLog {
+  id          String   @id @default(uuid())
+  shopId      String?
+  userId      String?
+  userName    String?
+  action      String
+  description String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  shop Shop? @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, createdAt])
+}
+
+model Enquiry {
+  id           String        @id @default(uuid())
+  name         String
+  businessType String?
+  contactNo    String
+  location     String?
+  status       EnquiryStatus @default(NEW)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+/// Atomic counters for bill / receipt / return numbers.
+model Sequence {
+  shopId String
+  key    String
+  value  Int    @default(0)
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@id([shopId, key])
+}
