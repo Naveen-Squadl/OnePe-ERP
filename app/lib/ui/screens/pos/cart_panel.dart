@@ -11,7 +11,6 @@ import '../../../state/session.dart';
 import '../../widgets/brand.dart';
 import '../../widgets/common.dart';
 import '../../widgets/pickers.dart';
-import 'payment_dialog.dart';
 
 class CartPanel extends StatelessWidget {
   final VoidCallback? onCheckedOut;
@@ -22,63 +21,170 @@ class CartPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final cart = context.watch<Cart>();
     final session = context.watch<Session>();
+    final banner = cart.isExpense
+        ? ('EXPENSE VOUCHER (Outflow)', AppColors.amber, AppColors.navy)
+        : cart.editingCompleted
+            ? ('Editing Bill #${cart.billNo}', AppColors.coral, Colors.white)
+            : cart.billNo != null
+                ? ('Waiting Bill #${cart.billNo}${cart.tableName != null ? ' • ${cart.tableName}' : ''}', AppColors.amber, AppColors.navy)
+                : null;
     return ColoredBox(
-      color: Colors.white,
-      child: Column(children: [
-        if (cart.billNo != null || cart.isExpense)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            color: cart.isExpense ? const Color(0xFFFFF3E0) : const Color(0xFFFFF8E1),
-            child: Text(
-              cart.isExpense
-                  ? 'EXPENSE VOUCHER (Outflow)'
-                  : cart.editingCompleted
-                      ? 'Editing Bill #${cart.billNo}'
-                      : 'Waiting Bill #${cart.billNo}${cart.tableName != null ? ' • ${cart.tableName}' : ''}',
-              style: TextStyle(fontWeight: FontWeight.w600, color: cart.editingCompleted ? AppColors.danger : StatusColors.waiting),
-            ),
-          ),
-        if (popOnDone) _MobileCustomerRow(cart: cart),
-        if (cart.isExpense) _ExpenseDateRow(cart: cart),
-        Expanded(
-          child: cart.isEmpty
-              ? const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  Icon(Icons.shopping_cart_outlined, size: 84, color: Color(0xFFC4C8CF)),
-                  SizedBox(height: 10),
-                  Text('Your cart is empty', style: TextStyle(fontSize: 18, color: AppColors.muted)),
-                ])
-              : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                  itemCount: cart.lines.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 10),
-                  itemBuilder: (_, i) => _LineCard(line: cart.lines[i]),
+      color: popOnDone ? AppColors.bg : Colors.white,
+      child: SafeArea(
+        bottom: false,
+        child: Column(children: [
+          Padding(
+            padding: EdgeInsets.fromLTRB(popOnDone ? 8 : 20, 12, 14, 10),
+            child: Row(children: [
+              if (popOnDone) ...[
+                IconButton(
+                  tooltip: 'Back to catalog',
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: IconButton.styleFrom(backgroundColor: Colors.white, fixedSize: const Size(44, 44)),
+                  icon: const Icon(Icons.arrow_back_rounded),
                 ),
-        ),
-        _Summary(cart: cart, session: session),
-      ]),
+                const SizedBox(width: 8),
+              ],
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(cart.isExpense ? 'Expense voucher' : 'Current order', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+                  Text('${qty(cart.itemCount)} item(s)${session.activeBranch != null ? ' · ${session.activeBranch!.name}' : ''}',
+                      style: const TextStyle(fontSize: 12, color: AppColors.muted, fontWeight: FontWeight.w600)),
+                ]),
+              ),
+              TextButton.icon(
+                onPressed: () {
+                  cart.clear();
+                  showSnack(context, 'New order started.');
+                },
+                style: TextButton.styleFrom(
+                  backgroundColor: AppColors.lime,
+                  foregroundColor: AppColors.navy,
+                  minimumSize: const Size(0, 40),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+                ),
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('New order'),
+              ),
+            ]),
+          ),
+          if (banner != null)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(color: banner.$2, borderRadius: BorderRadius.circular(12)),
+              child: Text(banner.$1, style: TextStyle(fontWeight: FontWeight.w800, color: banner.$3, fontSize: 13)),
+            ),
+          if (!cart.isExpense) _OrderContextRow(cart: cart, onCard: popOnDone),
+          if (cart.isExpense) _ExpenseDateRow(cart: cart),
+          Expanded(
+            child: cart.isEmpty
+                ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Container(
+                      width: 96,
+                      height: 96,
+                      decoration: const BoxDecoration(color: AppColors.cream, shape: BoxShape.circle),
+                      child: const Icon(Icons.shopping_basket_rounded, size: 44, color: Color(0xFF8C8A5E)),
+                    ),
+                    const SizedBox(height: 14),
+                    const Text('Your cart is empty', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 4),
+                    const Text('Tap a product to add it to this order', style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w500)),
+                  ])
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
+                    itemCount: cart.lines.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
+                    itemBuilder: (_, i) => _LineCard(line: cart.lines[i], onCard: popOnDone),
+                  ),
+          ),
+          _Summary(cart: cart, session: session),
+        ]),
+      ),
     );
   }
 }
 
-class _MobileCustomerRow extends StatelessWidget {
+/// Table / counter picker shared by the POS header and the cart.
+Future<void> pickTable(BuildContext context, Cart cart) async {
+  final s = context.read<Session>();
+  final tables = {...?s.activeBranch?.tableNames, ...?s.shop?.settings.tableNames}.toList();
+  final t = await showModalBottomSheet<String>(
+    context: context,
+    builder: (c) => SafeArea(
+      child: ListView(shrinkWrap: true, children: [
+        const ListTile(title: Text('Table / Counter', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18))),
+        ListTile(leading: const Icon(Icons.block), title: const Text('Not Selected'), onTap: () => Navigator.pop(c, '')),
+        if (tables.isEmpty) const ListTile(title: Text('Add tables / counters in Settings or Branches')),
+        for (final t in tables) ListTile(leading: const Icon(Icons.table_restaurant_outlined), title: Text(t), selected: cart.tableName == t, onTap: () => Navigator.pop(c, t)),
+      ]),
+    ),
+  );
+  if (t != null) cart.setTable(t.isEmpty ? null : t);
+}
+
+/// Customer ("Walk-in · Search / Add customer") and table cards above the order lines.
+class _OrderContextRow extends StatelessWidget {
   final Cart cart;
-  const _MobileCustomerRow({required this.cart});
+  final bool onCard; // true on the phone cart page (grey ground → white cards)
+  const _OrderContextRow({required this.cart, required this.onCard});
 
   @override
-  Widget build(BuildContext context) => ListTile(
-        dense: true,
-        leading: const IconTile(Icons.person, AppColors.green, size: 32),
-        title: Text(cart.customer?.name ?? (cart.customerPhone != null ? 'New Customer (${cart.customerPhone})' : 'Walk-in')),
-        subtitle: Text(cart.tableName == null ? 'Storage / Counter: Not Selected' : 'Storage / Counter: ${cart.tableName}'),
-        trailing: TextButton(
-          onPressed: () async {
-            final c = await pickCustomer(context);
-            if (c != null) cart.setCustomer(c);
-          },
-          child: const Text('Change'),
+  Widget build(BuildContext context) {
+    final bg = onCard ? Colors.white : AppColors.bg;
+    final name = cart.customer?.name ?? (cart.customerPhone != null ? 'New Customer (${cart.customerPhone})' : 'Walk-in');
+    final sub = cart.customer != null
+        ? 'Balance ${money(cart.customer!.balance)}${cart.customer!.loyaltyPoints > 0 ? ' · ★ ${cart.customer!.loyaltyPoints.toStringAsFixed(0)}' : ''} · Change'
+        : 'Search / Add customer';
+    Widget card({required Widget child, required VoidCallback onTap, double? width}) => SizedBox(
+          width: width,
+          height: 54,
+          child: Material(
+            color: bg,
+            borderRadius: BorderRadius.circular(16),
+            child: InkWell(borderRadius: BorderRadius.circular(16), onTap: onTap, child: child),
+          ),
+        );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Row(children: [
+        Expanded(
+          child: card(
+            onTap: () async {
+              final c = await pickCustomer(context);
+              if (c != null) cart.setCustomer(c);
+            },
+            child: Row(children: [
+              const SizedBox(width: 10),
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(color: AppColors.blue, borderRadius: BorderRadius.circular(11)),
+                child: const Icon(Icons.person_rounded, color: Colors.white, size: 19),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                  Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 11, color: AppColors.blue)),
+                ]),
+              ),
+            ]),
+          ),
         ),
-      );
+        const SizedBox(width: 8),
+        card(
+          width: 86,
+          onTap: () => pickTable(context, cart),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            const Text('Table', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.muted)),
+            Text(cart.tableName ?? 'None', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
+          ]),
+        ),
+      ]),
+    );
+  }
 }
 
 class _ExpenseDateRow extends StatelessWidget {
@@ -103,7 +209,8 @@ class _ExpenseDateRow extends StatelessWidget {
 /// Cart line: name + line total, price option dropdown, qty stepper, "Add Discount".
 class _LineCard extends StatelessWidget {
   final CartLine line;
-  const _LineCard({required this.line});
+  final bool onCard;
+  const _LineCard({required this.line, this.onCard = false});
 
   Future<void> _onPriceOption(BuildContext context, String v) async {
     final cart = context.read<Cart>();
@@ -132,13 +239,14 @@ class _LineCard extends StatelessWidget {
       'custom': line.priceType == 'custom' ? 'Custom: ${money(line.price).replaceAll('.00', '')}' : 'Custom / Edit',
     };
     final current = options.containsKey(line.priceType) ? line.priceType : 'custom';
+    final fieldBg = onCard ? AppColors.bg : Colors.white;
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 10, 10),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 8),
+      decoration: BoxDecoration(color: onCard ? Colors.white : AppColors.bg, borderRadius: BorderRadius.circular(18)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Expanded(child: Text(line.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15))),
-          Text(money(t.total).replaceAll('.00', ''), style: const TextStyle(color: AppColors.blue, fontWeight: FontWeight.w700, fontSize: 15)),
+          Expanded(child: Text(line.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14))),
+          Text(money(t.total).replaceAll('.00', ''), style: const TextStyle(color: AppColors.blue, fontWeight: FontWeight.w800, fontSize: 15)),
         ]),
         const SizedBox(height: 8),
         Row(children: [
@@ -146,12 +254,12 @@ class _LineCard extends StatelessWidget {
             child: Container(
               height: 38,
               padding: const EdgeInsets.symmetric(horizontal: 10),
-              decoration: BoxDecoration(color: const Color(0xFFF1F3F7), borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(color: fieldBg, borderRadius: BorderRadius.circular(12)),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
                   value: current,
                   isExpanded: true,
-                  style: const TextStyle(fontSize: 13, color: AppColors.text),
+                  style: const TextStyle(fontFamily: AppTheme.font, fontSize: 13, color: AppColors.text, fontWeight: FontWeight.w600),
                   items: [for (final e in options.entries) DropdownMenuItem(value: e.key, child: Text(e.value, overflow: TextOverflow.ellipsis))],
                   onChanged: (v) => v == null ? null : _onPriceOption(context, v),
                 ),
@@ -159,25 +267,21 @@ class _LineCard extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          _square(Icons.remove, () => cart.setQty(line, line.quantity - 1)),
+          _square(Icons.remove_rounded, fieldBg, () => cart.setQty(line, line.quantity - 1)),
           InkWell(
             onTap: () async {
               final v = await askNumber(context, 'Set Quantity (${line.name})', label: 'Quantity', initial: line.quantity);
               if (v != null) cart.setQty(line, v);
             },
             child: Container(
-              height: 34,
-              constraints: const BoxConstraints(minWidth: 42),
-              margin: const EdgeInsets.symmetric(horizontal: 6),
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              decoration: BoxDecoration(color: const Color(0xFFEAF2FE), borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.blue)),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Text(qty(line.quantity), style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.blue, fontSize: 15)),
-                const Icon(Icons.edit, size: 11, color: AppColors.blue),
-              ]),
+              height: 36,
+              constraints: const BoxConstraints(minWidth: 36),
+              alignment: Alignment.center,
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text(qty(line.quantity), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
             ),
           ),
-          _square(Icons.add, () => cart.setQty(line, line.quantity + 1)),
+          _square(Icons.add_rounded, fieldBg, () => cart.setQty(line, line.quantity + 1)),
         ]),
         const SizedBox(height: 6),
         Row(children: [
@@ -189,14 +293,15 @@ class _LineCard extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.local_offer, size: 15, color: AppColors.green),
+                Icon(Icons.local_offer_rounded, size: 15, color: line.discount > 0 ? AppColors.green : AppColors.blue),
                 const SizedBox(width: 6),
-                Text(line.discount > 0 ? 'Discount: -${money(line.discount)}' : 'Add Discount', style: const TextStyle(color: AppColors.green, fontWeight: FontWeight.w600, fontSize: 13)),
+                Text(line.discount > 0 ? 'Discount: -${money(line.discount)}' : 'Add Discount',
+                    style: TextStyle(color: line.discount > 0 ? AppColors.green : AppColors.blue, fontWeight: FontWeight.w700, fontSize: 12)),
               ]),
             ),
           ),
           const Spacer(),
-          if (line.gstPercent > 0) Text('GST ${line.gstPercent.toStringAsFixed(0)}%', style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+          if (line.gstPercent > 0) Text('GST ${line.gstPercent.toStringAsFixed(0)}%', style: const TextStyle(fontSize: 11, color: AppColors.muted, fontWeight: FontWeight.w600)),
           IconButton(
             tooltip: 'Add note (kitchen)',
             visualDensity: VisualDensity.compact,
@@ -223,14 +328,13 @@ class _LineCard extends StatelessWidget {
     );
   }
 
-  Widget _square(IconData icon, VoidCallback onTap) => InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.border)),
-          child: Icon(icon, size: 18),
+  Widget _square(IconData icon, Color bg, VoidCallback onTap) => Material(
+        color: bg,
+        borderRadius: BorderRadius.circular(11),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(11),
+          child: SizedBox(width: 36, height: 36, child: Icon(icon, size: 18, color: AppColors.navy)),
         ),
       );
 }
@@ -278,16 +382,29 @@ Future<void> editBillDiscount(BuildContext context, Cart cart) async {
   if (ok == true) cart.setDiscount(type, double.tryParse(ctrl.text) ?? 0);
 }
 
-class _Summary extends StatelessWidget {
+class _Summary extends StatefulWidget {
   final Cart cart;
   final Session session;
   const _Summary({required this.cart, required this.session});
 
+  @override
+  State<_Summary> createState() => _SummaryState();
+}
+
+/// Compact checkout footer: one-line total (breakdown on tap), round off, a single row of
+/// small actions and the pay button – so the item list keeps most of a phone screen.
+class _SummaryState extends State<_Summary> {
+  bool showDetails = false;
+  Cart get cart => widget.cart;
+  Session get session => widget.session;
+
+  static String _signed(double v) => '${v > 0 ? '+' : '-'}${v.abs().toStringAsFixed(2)}';
+
   Widget _row(String l, String r, {Color? color}) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3),
+        padding: const EdgeInsets.symmetric(vertical: 2),
         child: Row(children: [
-          Expanded(child: Text(l, style: const TextStyle(color: Color(0xFF5F6368), fontSize: 15))),
-          Text(r, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: color)),
+          Expanded(child: Text(l, style: const TextStyle(color: Color(0xFFC9D6EA), fontSize: 13, fontWeight: FontWeight.w600))),
+          Text(r, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: color ?? Colors.white)),
         ]),
       );
 
@@ -314,7 +431,8 @@ class _Summary extends StatelessWidget {
 
   Future<void> _pay(BuildContext context) async {
     if (cart.isEmpty) return showSnack(context, 'Your cart is empty', error: true);
-    final bill = await showPaymentDialog(context, cart);
+    final credit = cart.onCredit && cart.hasCustomer && !cart.isExpense;
+    final bill = await guard(context, () => cart.checkout(paymentMethod: credit ? 'CREDIT' : 'CASH', received: credit ? 0 : cart.payable));
     if (bill == null || !context.mounted) return;
     context.read<Catalog>().load(); // refresh stock
     final panel = context.findAncestorWidgetOfExactType<CartPanel>();
@@ -325,51 +443,153 @@ class _Summary extends StatelessWidget {
     if (hostContext.mounted) await showBillDoneDialog(hostContext, bill, session);
   }
 
+  /// Outlined action on the blue payment card (lime when toggled on).
+  Widget _action(IconData icon, String label, VoidCallback? onTap, {bool selected = false}) => Expanded(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 3),
+          child: Material(
+            color: selected ? AppColors.lime : Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: selected ? AppColors.lime : Colors.white.withValues(alpha: .3)),
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: onTap,
+              child: SizedBox(
+                height: 46,
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(icon, size: 17, color: selected ? AppColors.navy : Colors.white),
+                  const SizedBox(height: 2),
+                  Text(label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: selected ? AppColors.navy : Colors.white)),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      );
+
+  Widget _roundOption(String mode, String label, String sub) {
+    final on = cart.roundMode == mode;
+    return Expanded(
+      child: Material(
+        color: on ? AppColors.lime : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => cart.setRoundMode(mode == cart.roundMode ? 'none' : mode),
+          child: SizedBox(
+            height: 44,
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: on ? AppColors.navy : Colors.white)),
+              Text(sub, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: on ? AppColors.navy : const Color(0xFFB9C4D8))),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = session.shop?.settings;
     final showKot = (s?.enableKot ?? false) && !cart.isExpense && !cart.isEmpty;
     final showLoyalty = !cart.isExpense && (s?.enableLoyalty ?? false) && (cart.customer?.loyaltyPoints ?? 0) > 0;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(22, 18, 22, 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: .06), blurRadius: 16, offset: const Offset(0, -4))],
-      ),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        _row('Subtotal', money(cart.subtotal).replaceAll('.00', '')),
-        if (cart.totalGst > 0) _row('Tax (GST)', money(cart.totalGst).replaceAll('.00', '')),
-        if (cart.itemDiscount > 0) _row('Item Discounts', '-${money(cart.itemDiscount)}', color: AppColors.green),
-        if (cart.billDiscount > 0) _row('Bill Discount', '-${money(cart.billDiscount)}', color: AppColors.green),
-        if (cart.loyaltyDiscount > 0) _row('Loyalty Discount', '-${money(cart.loyaltyDiscount)}', color: AppColors.green),
-        const Divider(height: 22),
-        Row(children: [
-          const Expanded(child: Text('TOTAL', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 20))),
-          Text(money(cart.total).replaceAll('.00', ''), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 28, color: AppColors.blue)),
-        ]),
-        const SizedBox(height: 12),
-        if (!cart.isExpense) GreenOutlineButton(label: cart.billDiscount > 0 ? 'Change Bill Discount' : 'Apply Bill Discount', icon: Icons.percent, onPressed: cart.isEmpty ? null : () => editBillDiscount(context, cart)),
-        if (showLoyalty) ...[
-          const SizedBox(height: 8),
-          GreenOutlineButton(label: 'Redeem Points (Available: ${cart.customer!.loyaltyPoints.toStringAsFixed(0)})', icon: Icons.stars_rounded, onPressed: () => _loyalty(context)),
-        ],
-        if (!cart.isEmpty && !cart.isExpense) ...[
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(child: OutlinedButton.icon(onPressed: () => _saveWaiting(context), icon: const Icon(Icons.pending_actions, size: 18), label: const Text('Hold'))),
-            if (showKot) ...[
-              const SizedBox(width: 8),
-              Expanded(child: OutlinedButton.icon(onPressed: () => _kot(context), icon: const Icon(Icons.soup_kitchen_outlined, size: 18), label: const Text('KOT'))),
+    const light = Color(0xFFC9D6EA);
+    final payable = money(cart.payable).replaceAll('.00', '');
+    return Padding(
+      padding: EdgeInsets.fromLTRB(8, 10, 8, 8 + MediaQuery.of(context).padding.bottom),
+      child: Stack(children: [
+        // Brand element: lime step behind the payment card's upper-left edge.
+        Positioned(
+          left: 0,
+          top: 0,
+          width: 210,
+          height: 60,
+          child: Container(decoration: const BoxDecoration(color: AppColors.lime, borderRadius: BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(18)))),
+        ),
+        Container(
+          margin: const EdgeInsets.only(top: 9),
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+          decoration: BoxDecoration(color: AppColors.blue, borderRadius: BorderRadius.circular(24)),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            InkWell(
+              onTap: () => setState(() => showDetails = !showDetails),
+              borderRadius: BorderRadius.circular(10),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(cart.isExpense ? 'Expense total' : 'Total payable', style: const TextStyle(color: AppColors.lime, fontSize: 12, fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 2),
+                    Row(children: [
+                      Flexible(
+                        child: Text(
+                          cart.totalGst > 0
+                              ? 'Subtotal ${money(cart.subtotal).replaceAll('.00', '')} · GST ${money(cart.totalGst).replaceAll('.00', '')}'
+                              : (cart.itemDiscount + cart.billDiscount + cart.loyaltyDiscount > 0 ? 'View breakdown' : 'Subtotal ${money(cart.subtotal).replaceAll('.00', '')}'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: light, fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      Icon(showDetails ? Icons.expand_more_rounded : Icons.expand_less_rounded, size: 16, color: light),
+                    ]),
+                  ]),
+                ),
+                Text(money(cart.total).replaceAll('.00', ''), style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.8)),
+              ]),
+            ),
+            if (showDetails) ...[
+              const SizedBox(height: 8),
+              _row('Subtotal', money(cart.subtotal).replaceAll('.00', '')),
+              if (cart.totalGst > 0) _row('Tax (GST)', money(cart.totalGst).replaceAll('.00', '')),
+              if (cart.itemDiscount > 0) _row('Item Discounts', '-${money(cart.itemDiscount)}', color: AppColors.lime),
+              if (cart.billDiscount > 0) _row('Bill Discount', '-${money(cart.billDiscount)}', color: AppColors.lime),
+              if (cart.loyaltyDiscount > 0) _row('Loyalty Discount', '-${money(cart.loyaltyDiscount)}', color: AppColors.lime),
+              if (cart.roundMode != 'none') _row('Round Off', _signed(cart.roundOff)),
             ],
+            if (!cart.isEmpty && cart.hasPaise) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(color: AppColors.navy, borderRadius: BorderRadius.circular(16)),
+                child: Row(children: [
+                  _roundOption('none', 'Exact', money(cart.total)),
+                  const SizedBox(width: 4),
+                  _roundOption('down', money(cart.roundedTotal('down')).replaceAll('.00', ''), _signed(cart.roundedTotal('down') - cart.total)),
+                  const SizedBox(width: 4),
+                  _roundOption('up', money(cart.roundedTotal('up')).replaceAll('.00', ''), _signed(cart.roundedTotal('up') - cart.total)),
+                ]),
+              ),
+            ],
+            if (!cart.isEmpty && !cart.isExpense) ...[
+              const SizedBox(height: 10),
+              Row(children: [
+                _action(Icons.percent_rounded, cart.billDiscount > 0 ? 'Discount ✓' : 'Discount', () => editBillDiscount(context, cart), selected: cart.billDiscount > 0),
+                if (showLoyalty) _action(Icons.stars_rounded, 'Points ${cart.customer!.loyaltyPoints.toStringAsFixed(0)}', () => _loyalty(context), selected: cart.loyaltyRedeem > 0),
+                _action(Icons.pause_circle_outline_rounded, 'Hold', () => _saveWaiting(context)),
+                if (showKot) _action(Icons.soup_kitchen_outlined, 'KOT', () => _kot(context)),
+                if (cart.hasCustomer) _action(Icons.account_balance_wallet_outlined, 'Credit', () => cart.setOnCredit(!cart.onCredit), selected: cart.onCredit),
+              ]),
+            ],
+            const SizedBox(height: 12),
+            GreenButton(
+              height: 54,
+              label: cart.isExpense
+                  ? 'Record Expense Voucher'
+                  : cart.isEmpty
+                      ? 'Charge'
+                      : cart.onCredit
+                          ? 'Save on Credit · $payable'
+                          : 'Charge $payable',
+              icon: cart.isExpense ? Icons.receipt_long_rounded : Icons.arrow_forward_rounded,
+              busy: cart.busy,
+              onPressed: () => _pay(context),
+            ),
           ]),
-        ],
-        const SizedBox(height: 12),
-        GreenButton(
-          label: cart.isExpense ? 'Record Expense Voucher' : 'Proceed to Payment',
-          icon: Icons.payments_outlined,
-          busy: cart.busy,
-          onPressed: () => _pay(context),
         ),
       ]),
     );

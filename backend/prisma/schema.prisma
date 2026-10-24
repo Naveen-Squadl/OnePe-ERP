@@ -328,6 +328,8 @@ model Bill {
   discount              Decimal       @default(0) @db.Decimal(12, 2)
   loyaltyPointsRedeemed Decimal       @default(0) @db.Decimal(12, 2)
   loyaltyPointsEarned   Decimal       @default(0) @db.Decimal(12, 2)
+  /// Rounding adjustment already included in totalAmount (e.g. -0.60 or +0.40).
+  roundOff              Decimal       @default(0) @db.Decimal(12, 2)
   totalAmount           Decimal       @default(0) @db.Decimal(12, 2)
   receivedAmount        Decimal       @default(0) @db.Decimal(12, 2)
   /// Change returned (if paid more) – customer balance changes are captured below.

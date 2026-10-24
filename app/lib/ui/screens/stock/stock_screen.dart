@@ -116,7 +116,7 @@ class _StockScreenState extends State<StockScreen> {
     final canManage = _canManage;
     InputDecoration box(Widget prefix) => InputDecoration(
           prefixIcon: prefix,
-          fillColor: const Color(0xFFF0F3F8),
+          fillColor: AppColors.bg,
           isDense: true,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border)),
           enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border)),
@@ -128,7 +128,7 @@ class _StockScreenState extends State<StockScreen> {
         child: Column(children: [
           DropdownButtonFormField<String?>(
             initialValue: _stockCategory,
-            decoration: box(const Icon(Icons.inventory_2, color: Color(0xFF8D6E63))),
+            decoration: box(const Icon(Icons.inventory_2, color: AppColors.orange)),
             items: [
               const DropdownMenuItem(value: null, child: Text('All Categories (Entire Catalog)', style: TextStyle(fontWeight: FontWeight.w600))),
               for (final c in cats) DropdownMenuItem(value: c.id, child: Text(c.name)),
@@ -234,7 +234,7 @@ class _StockScreenState extends State<StockScreen> {
                             textAlign: TextAlign.center,
                             keyboardType: const TextInputType.numberWithOptions(decimal: true),
                             style: const TextStyle(fontWeight: FontWeight.w700, fontFamily: 'monospace'),
-                            decoration: InputDecoration(fillColor: const Color(0xFFF1F3F7), isDense: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none)),
+                            decoration: InputDecoration(fillColor: AppColors.bg, isDense: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none)),
                             onTap: () => ctrl.selection = TextSelection(baseOffset: 0, extentOffset: ctrl.text.length),
                             onSubmitted: (_) => _applyRow(p),
                           ),

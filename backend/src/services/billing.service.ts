@@ -37,6 +37,8 @@ export const CheckoutSchema = z.object({
   discountType: z.enum(['flat', 'percent']).default('flat'),
   discountValue: z.coerce.number().min(0).default(0),
   loyaltyPointsToRedeem: z.coerce.number().min(0).default(0),
+  /** Round the payable total to a whole rupee: down (435.60 → 435) or up (→ 436). */
+  roundMode: z.enum(['none', 'down', 'up']).default('none'),
   paymentMethod: z.nativeEnum(PaymentMethod).default(PaymentMethod.CASH),
   receivedAmount: z.coerce.number().min(0).nullish(),
   cashAmount: z.coerce.number().min(0).default(0),
@@ -94,6 +96,7 @@ export function computeTotals(
   discountType: 'flat' | 'percent',
   discountValue: number,
   loyaltyRedeem: number,
+  roundMode: 'none' | 'down' | 'up' = 'none',
 ) {
   const subtotal = round2(lines.reduce((s, l) => s + l.taxableAmount, 0));
   const totalGst = round2(lines.reduce((s, l) => s + l.gstAmount, 0));
@@ -102,8 +105,10 @@ export function computeTotals(
   let discount = discountType === 'percent' ? round2((gross * Math.min(discountValue, 100)) / 100) : discountValue;
   discount = Math.min(discount, gross);
   const redeem = Math.min(loyaltyRedeem, round2(gross - discount));
-  const total = round2(gross - discount - redeem);
-  return { subtotal, totalGst, itemDiscount, discount: round2(discount), loyaltyRedeem: round2(redeem), total };
+  const exact = round2(gross - discount - redeem);
+  const total = roundMode === 'down' ? Math.floor(exact + 1e-9) : roundMode === 'up' ? Math.ceil(exact - 1e-9) : exact;
+  const roundOff = round2(total - exact);
+  return { subtotal, totalGst, itemDiscount, discount: round2(discount), loyaltyRedeem: round2(redeem), roundOff, total };
 }
 
 async function priceItems(
@@ -307,7 +312,7 @@ export async function checkout(user: AuthUser, shopId: string, branchId: string,
 
       const availablePoints = customer ? num(customer.loyaltyPoints) + (existing && input.editing ? num(existing.loyaltyPointsRedeemed) : 0) : 0;
       const redeemReq = settings.enableLoyaltyPoints ? Math.min(input.loyaltyPointsToRedeem, availablePoints) : 0;
-      const totals = computeTotals(lines, input.discountType, input.discountValue, redeemReq);
+      const totals = computeTotals(lines, input.discountType, input.discountValue, redeemReq, input.roundMode);
 
       // Payment
       let received: number;
@@ -340,6 +345,7 @@ export async function checkout(user: AuthUser, shopId: string, branchId: string,
         itemDiscount: totals.itemDiscount,
         discount: totals.discount,
         loyaltyPointsRedeemed: totals.loyaltyRedeem,
+        roundOff: totals.roundOff,
         totalAmount: totals.total,
         receivedAmount: input.status === BillStatus.COMPLETED ? received : 0,
         changeAmount: input.status === BillStatus.COMPLETED ? change : 0,

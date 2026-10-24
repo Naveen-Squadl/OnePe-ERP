@@ -86,35 +86,64 @@ class _CustomersScreenState extends State<CustomersScreen> {
                               child: Row(children: [
                                 CircleAvatar(
                                   radius: 24,
-                                  backgroundColor: const Color(0xFFE6F6EE),
-                                  child: Text(c.name.characters.first.toUpperCase(), style: const TextStyle(color: AppColors.green, fontWeight: FontWeight.w700, fontSize: 18)),
+                                  backgroundColor: AppColors.blueTint,
+                                  child: Text(c.name.characters.first.toUpperCase(), style: const TextStyle(color: AppColors.blue, fontWeight: FontWeight.w800, fontSize: 18)),
                                 ),
                                 const SizedBox(width: 14),
                                 Expanded(
                                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                    Text(c.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                                    Text(c.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
                                     if (c.phone != null)
                                       Row(children: [
                                         const Icon(Icons.phone, size: 13, color: AppColors.muted),
                                         const SizedBox(width: 4),
-                                        Text(c.phone!, style: const TextStyle(fontSize: 13, color: Color(0xFF5F6368))),
-                                        if (c.loyaltyPoints > 0) Text('   ★ ${c.loyaltyPoints.toStringAsFixed(0)} pts', style: const TextStyle(fontSize: 12, color: Color(0xFFD4A017))),
+                                        Text(c.phone!, style: const TextStyle(fontSize: 13, color: AppColors.muted)),
+                                        if (c.loyaltyPoints > 0) Text('   ★ ${c.loyaltyPoints.toStringAsFixed(0)} pts', style: const TextStyle(fontSize: 12, color: AppColors.amberText)),
                                       ]),
                                     const SizedBox(height: 4),
                                     _BalanceText(c.balance),
                                   ]),
                                 ),
-                                RowAction(Icons.account_balance_wallet, const Color(0xFFD2691E), 'Receive Payment', () => open(pay: true)),
-                                RowAction(Icons.history, AppColors.blue, 'Purchase History', () => open(tab: 1)),
-                                RowAction(Icons.edit, AppColors.green, 'Edit Customer', () async {
-                                  if (await editCustomer(context, c)) setState(() => _v++);
-                                }),
-                                RowAction(Icons.delete_outline, AppColors.danger, 'Delete Customer', () async {
-                                  if (await confirm(context, 'Delete Customer', 'Delete ${c.name}? Their bills stay in history.', danger: true, ok: 'Delete') && context.mounted) {
-                                    final r = await guard(context, () => Api.instance.delete('/customers/${c.id}'));
-                                    if (r != null) setState(() => _v++);
-                                  }
-                                }),
+                                if (MediaQuery.of(context).size.width < 600)
+                                  // Phones: one menu instead of four buttons so name and phone keep their width.
+                                  PopupMenuButton<String>(
+                                    tooltip: 'Actions',
+                                    icon: const Icon(Icons.more_vert_rounded, color: AppColors.navy),
+                                    onSelected: (v) async {
+                                      switch (v) {
+                                        case 'pay':
+                                          open(pay: true);
+                                        case 'history':
+                                          open(tab: 1);
+                                        case 'edit':
+                                          if (await editCustomer(context, c)) setState(() => _v++);
+                                        case 'delete':
+                                          if (await confirm(context, 'Delete Customer', 'Delete ${c.name}? Their bills stay in history.', danger: true, ok: 'Delete') && context.mounted) {
+                                            final r = await guard(context, () => Api.instance.delete('/customers/${c.id}'));
+                                            if (r != null) setState(() => _v++);
+                                          }
+                                      }
+                                    },
+                                    itemBuilder: (_) => const [
+                                      PopupMenuItem(value: 'pay', child: ListTile(leading: Icon(Icons.account_balance_wallet, color: AppColors.orange), title: Text('Receive Payment'))),
+                                      PopupMenuItem(value: 'history', child: ListTile(leading: Icon(Icons.history, color: AppColors.blue), title: Text('Purchase History'))),
+                                      PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit), title: Text('Edit Customer'))),
+                                      PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, color: AppColors.danger), title: Text('Delete Customer'))),
+                                    ],
+                                  )
+                                else ...[
+                                  RowAction(Icons.account_balance_wallet, AppColors.orange, 'Receive Payment', () => open(pay: true)),
+                                  RowAction(Icons.history, AppColors.blue, 'Purchase History', () => open(tab: 1)),
+                                  RowAction(Icons.edit, AppColors.green, 'Edit Customer', () async {
+                                    if (await editCustomer(context, c)) setState(() => _v++);
+                                  }),
+                                  RowAction(Icons.delete_outline, AppColors.danger, 'Delete Customer', () async {
+                                    if (await confirm(context, 'Delete Customer', 'Delete ${c.name}? Their bills stay in history.', danger: true, ok: 'Delete') && context.mounted) {
+                                      final r = await guard(context, () => Api.instance.delete('/customers/${c.id}'));
+                                      if (r != null) setState(() => _v++);
+                                    }
+                                  }),
+                                ],
                               ]),
                             ),
                           ),
@@ -146,15 +175,19 @@ class _BalanceText extends StatelessWidget {
 }
 
 /// Add / edit customer dialog. Returns true when saved.
-Future<bool> editCustomer(BuildContext context, [Customer? c]) async {
+Future<bool> editCustomer(BuildContext context, [Customer? c]) async => await customerForm(context, c: c) != null;
+
+/// Add / edit customer form; [name] / [phone] prefill a new customer (e.g. from the POS search).
+/// Returns the saved customer, or null if cancelled or failed.
+Future<Customer?> customerForm(BuildContext context, {Customer? c, String? name, String? phone}) async {
   final r = await showFormDialog(context, title: c == null ? 'Add Customer' : 'Edit Customer', fields: [
-    FieldSpec('name', 'Customer Name', initial: c?.name, required: true),
-    FieldSpec('phone', 'Mobile Number', initial: c?.phone, keyboard: TextInputType.phone, validator: (v) => v.isEmpty || RegExp(r'^\d{10}$').hasMatch(v) ? null : 'Must be 10 digits'),
+    FieldSpec('name', 'Customer Name', initial: c?.name ?? name, required: true),
+    FieldSpec('phone', 'Mobile Number', initial: c?.phone ?? phone, keyboard: TextInputType.phone, validator: (v) => v.isEmpty || RegExp(r'^\d{10}$').hasMatch(v) ? null : 'Must be 10 digits'),
     FieldSpec('address', 'Address', initial: c?.address),
     FieldSpec('gstin', 'GSTIN', initial: c?.gstin),
     FieldSpec('openingBalance', c == null ? 'Opening Balance (Initial)' : 'Opening Balance (At Creation)', initial: '${c?.openingBalance ?? 0}', keyboard: TextInputType.number),
   ]);
-  if (r == null || !context.mounted) return false;
+  if (r == null || !context.mounted) return null;
   final body = {
     'name': r['name'],
     'phone': r['phone']!.isEmpty ? null : r['phone'],
@@ -162,9 +195,9 @@ Future<bool> editCustomer(BuildContext context, [Customer? c]) async {
     'gstin': r['gstin'],
     'openingBalance': double.tryParse(r['openingBalance']!) ?? 0,
   };
-  final ok = await guard(context, () => c == null ? Api.instance.post('/customers', body) : Api.instance.put('/customers/${c.id}', body),
+  final saved = await guard(context, () => c == null ? Api.instance.post('/customers', body) : Api.instance.put('/customers/${c.id}', body),
       success: c == null ? 'Customer added!' : 'Customer updated!');
-  return ok != null;
+  return saved == null ? null : Customer(Map<String, dynamic>.from(saved));
 }
 
 class CustomerDetail extends StatefulWidget {

@@ -168,6 +168,7 @@ class Bill {
   double get discount => toDouble(raw['discount']);
   double get loyaltyRedeemed => toDouble(raw['loyaltyPointsRedeemed']);
   double get loyaltyEarned => toDouble(raw['loyaltyPointsEarned']);
+  double get roundOff => toDouble(raw['roundOff']);
   double get total => toDouble(raw['totalAmount']);
   double get received => toDouble(raw['receivedAmount']);
   double get change => toDouble(raw['changeAmount']);

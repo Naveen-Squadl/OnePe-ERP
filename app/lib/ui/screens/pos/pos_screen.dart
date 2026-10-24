@@ -31,7 +31,6 @@ class _PosScreenState extends State<PosScreen> {
   String? _categoryId;
   String _view = 'grid'; // grid | list
   bool _reportsMode = false;
-  bool _detailsOpen = false;
   int _pending = 0;
   String? _branchLoaded;
 
@@ -105,142 +104,171 @@ class _PosScreenState extends State<PosScreen> {
 
   void _openCartPage() => Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => Scaffold(
-          appBar: const GradientAppBar(title: Text('Your Cart')),
+          backgroundColor: AppColors.bg,
           body: CartPanel(onCheckedOut: _refreshPending, popOnDone: true),
         ),
       ));
+
+  /// Bottom bar / side menu destinations (filtered by permission).
+  List<_NavDest> _destinations(Session session, {required bool wide}) => [
+        _NavDest('Sell', Icons.grid_view_rounded, () => setState(() => _reportsMode = false), selected: !_reportsMode),
+        if (session.can('bills.view')) _NavDest('Bills', Icons.receipt_long_rounded, () => context.go('/bills')),
+        if (session.can('reports.view')) _NavDest('Reports', Icons.bar_chart_rounded, () => setState(() => _reportsMode = true), selected: _reportsMode),
+        if (wide && session.can('customers.manage')) _NavDest('Customers', Icons.people_alt_rounded, () => context.go('/customers')),
+        if (wide && session.can('inventory.view')) _NavDest('Stock', Icons.inventory_2_rounded, () => context.go('/stock')),
+        if (wide && session.can('settings.manage')) _NavDest('Settings', Icons.tune_rounded, () => context.go('/settings')),
+      ];
 
   @override
   Widget build(BuildContext context) {
     final wide = MediaQuery.of(context).size.width >= 900;
     final cart = context.watch<Cart>();
     final session = context.watch<Session>();
-    final canReports = session.can('reports.view');
+    final header = _PosHeader(
+      wide: wide,
+      pending: _pending,
+      onSync: () async {
+        await syncCloudData(context);
+        _refreshPending();
+      },
+      onWaiting: _openWaitingList,
+      search: wide ? _searchField() : null,
+    );
+    if (wide) {
+      return Scaffold(
+        drawer: const AppDrawer(),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Builder(builder: (c) => _SideRail(items: _destinations(session, wide: true), onMore: () => Scaffold.of(c).openDrawer())),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  header,
+                  const SizedBox(height: 6),
+                  Expanded(child: _reportsMode ? const ReportsView(embedded: true) : _productArea(wide)),
+                ]),
+              ),
+              const SizedBox(width: 14),
+              SizedBox(
+                width: 372,
+                child: ClipRRect(borderRadius: BorderRadius.circular(26), child: CartPanel(onCheckedOut: _refreshPending)),
+              ),
+            ]),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       drawer: const AppDrawer(),
-      endDrawer: const AppDrawer(),
-      appBar: GradientAppBar(
-        centerTitle: false,
-        leading: Builder(builder: (c) => IconButton(tooltip: 'Open navigation menu', icon: const Icon(Icons.menu), onPressed: () => Scaffold.of(c).openDrawer())),
-        title: Row(children: [
-          const Icon(Icons.storefront_rounded),
-          if (session.branches.length > 1) ...[const SizedBox(width: 8), const BranchSwitcher()],
+      body: Stack(children: [
+        Column(children: [
+          header,
+          Expanded(
+            child: _reportsMode
+                ? const Padding(padding: EdgeInsets.only(bottom: 84), child: ReportsView(embedded: true))
+                : Column(children: [
+                    Transform.translate(offset: const Offset(0, -30), child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: _searchField())),
+                    Expanded(child: Transform.translate(offset: const Offset(0, -22), child: _productArea(wide))),
+                  ]),
+          ),
         ]),
-        actions: [
-          if (canReports)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: Colors.white.withValues(alpha: .18),
-                  foregroundColor: Colors.white,
-                  side: const BorderSide(color: Colors.white70),
-                  shape: const StadiumBorder(),
-                  minimumSize: const Size(0, 34),
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                ),
-                onPressed: () => setState(() => _reportsMode = !_reportsMode),
-                icon: Icon(_reportsMode ? Icons.storefront : Icons.bar_chart, size: 18),
-                label: Text(_reportsMode ? 'Shop ⇄' : 'Reports ⇄', style: const TextStyle(fontWeight: FontWeight.w600)),
+        Positioned(
+          left: 12,
+          right: 12,
+          bottom: 12,
+          child: SafeArea(
+            top: false,
+            child: Builder(
+              builder: (c) => _Dock(
+                items: _destinations(session, wide: false),
+                onMore: () => Scaffold.of(c).openDrawer(),
+                cartCount: cart.itemCount,
+                cartTotal: cart.payable,
+                onCart: _openCartPage,
               ),
             ),
-          IconButton(
-            tooltip: 'New Order',
-            onPressed: () {
-              cart.clear();
-              showSnack(context, 'New order started.');
-            },
-            icon: const Icon(Icons.add_shopping_cart),
           ),
-          if (session.can('bills.view')) IconButton(tooltip: 'Bills History', onPressed: () => context.go('/bills'), icon: const Icon(Icons.playlist_add_check)),
-          PopupMenuButton<String>(
-            tooltip: 'Profile',
-            icon: const CircleAvatar(radius: 14, backgroundColor: Colors.white30, child: Icon(Icons.person, size: 18, color: Colors.white)),
-            onSelected: (v) => v == 'logout' ? session.logout() : null,
-            itemBuilder: (_) => [
-              PopupMenuItem(enabled: false, child: Text('${session.user?.name}\n${session.user?.role.replaceAll('_', ' ')}')),
-              const PopupMenuItem(value: 'logout', child: Text('Logout')),
-            ],
-          ),
-          IconButton(
-            tooltip: _pending > 0 ? 'Sync $_pending offline bill(s)' : 'Sync Cloud Data',
-            onPressed: () async {
-              await syncCloudData(context);
-              _refreshPending();
-            },
-            icon: Badge(isLabelVisible: _pending > 0, label: Text('$_pending'), child: const Icon(Icons.sync)),
-          ),
-          IconButton(
-            tooltip: wide ? 'Waiting List' : 'Your Cart',
-            onPressed: wide ? _openWaitingList : _openCartPage,
-            icon: Badge(isLabelVisible: !wide && !cart.isEmpty, label: Text(qty(cart.itemCount)), child: const Icon(Icons.shopping_cart)),
-          ),
-          Builder(builder: (c) => IconButton(tooltip: 'Menu', icon: const Icon(Icons.menu), onPressed: () => Scaffold.of(c).openEndDrawer())),
-        ],
-      ),
-      body: Row(children: [
-        Expanded(child: _reportsMode ? const ReportsView(embedded: true) : _productArea(wide)),
-        if (wide) Container(width: 360, decoration: const BoxDecoration(border: Border(left: BorderSide(color: AppColors.border))), child: CartPanel(onCheckedOut: _refreshPending)),
+        ),
       ]),
-      bottomNavigationBar: wide || cart.isEmpty
-          ? null
-          : SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
-                child: GreenButton(label: '${qty(cart.itemCount)} item(s) • ${money(cart.total)}  —  View Cart', icon: Icons.shopping_cart, onPressed: _openCartPage, height: 52),
+    );
+  }
+
+  /// White search pill with list/grid toggle and the Scan button.
+  Widget _searchField() {
+    final catalog = context.read<Catalog>();
+    return Material(
+      color: Colors.white,
+      elevation: 6,
+      shadowColor: AppColors.navy.withValues(alpha: .25),
+      borderRadius: BorderRadius.circular(18),
+      child: SizedBox(
+        height: 52,
+        child: Row(children: [
+          const SizedBox(width: 14),
+          const Icon(Icons.search_rounded, color: AppColors.muted),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: _search,
+              onChanged: (_) => setState(() {}),
+              style: const TextStyle(fontWeight: FontWeight.w600),
+              decoration: const InputDecoration(
+                filled: false,
+                isDense: true,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                hintText: 'Search items or scan',
+                contentPadding: EdgeInsets.zero,
               ),
+              onSubmitted: (v) {
+                final p = catalog.byBarcode(v);
+                if (p != null) {
+                  _addProduct(p);
+                  _search.clear();
+                  setState(() {});
+                }
+              },
             ),
+          ),
+          IconButton(
+            tooltip: _view == 'grid' ? 'List view' : 'Grid view',
+            onPressed: _toggleView,
+            icon: Icon(_view == 'grid' ? Icons.view_list_rounded : Icons.grid_view_rounded, color: AppColors.muted),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: IconButton.filled(
+              tooltip: 'Scan QR / Barcode for Rapid Bill',
+              onPressed: _scan,
+              style: IconButton.styleFrom(backgroundColor: AppColors.blue, foregroundColor: Colors.white, fixedSize: const Size(40, 40)),
+              icon: const Icon(Icons.qr_code_scanner_rounded, size: 20),
+            ),
+          ),
+        ]),
+      ),
     );
   }
 
   Widget _productArea(bool wide) {
     final catalog = context.watch<Catalog>();
-    final cart = context.watch<Cart>();
     // Expense categories show up at the end of the chip row; picking one switches to expense items.
     final cats = catalog.categories;
     final selectedCat = cats.where((c) => c.id == _categoryId).firstOrNull;
     final expense = selectedCat?.isExpenseCategory ?? false;
     final products = catalog.filter(categoryId: _categoryId, query: _search.text, expense: expense);
+    final hPad = wide ? 4.0 : 16.0;
     return Column(children: [
-      Padding(padding: const EdgeInsets.fromLTRB(12, 10, 12, 0), child: _OrderDetailsCard(open: _detailsOpen, onToggle: () => setState(() => _detailsOpen = !_detailsOpen), cart: cart)),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-        child: Container(
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
-          child: TextField(
-            controller: _search,
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
-              filled: false,
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              prefixIcon: const Icon(Icons.search, color: AppColors.blue),
-              hintText: 'Search items or scan barcode...',
-              suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [
-                IconButton(tooltip: _view == 'grid' ? 'List view' : 'Grid view', onPressed: _toggleView, icon: Icon(_view == 'grid' ? Icons.grid_view_rounded : Icons.view_list_rounded, color: AppColors.blue)),
-                IconButton(tooltip: 'Scan QR / Barcode for Rapid Bill', onPressed: _scan, icon: const Icon(Icons.qr_code_scanner, color: AppColors.blue)),
-              ]),
-            ),
-            onSubmitted: (v) {
-              final p = catalog.byBarcode(v);
-              if (p != null) {
-                _addProduct(p);
-                _search.clear();
-                setState(() {});
-              }
-            },
-          ),
-        ),
-      ),
       SizedBox(
-        height: 58,
-        child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.fromLTRB(12, 10, 12, 6), children: [
-          CategoryChip(label: 'All', color: AppColors.blue, selected: _categoryId == null, onTap: () => setState(() => _categoryId = null)),
+        height: 54,
+        child: ListView(scrollDirection: Axis.horizontal, padding: EdgeInsets.fromLTRB(hPad, 8, hPad, 8), children: [
+          CategoryChip(label: 'All', color: AppColors.lime, selected: _categoryId == null, onTap: () => setState(() => _categoryId = null)),
           for (final (i, c) in cats.indexed)
             CategoryChip(
               label: c.isExpenseCategory ? '${c.name} (Expense)' : c.name,
-              color: c.isExpenseCategory ? AppColors.orange : AppColors.forIndex(i),
+              color: c.isExpenseCategory ? AppColors.amber : AppColors.forIndex(i),
               selected: _categoryId == c.id,
               onTap: () => setState(() => _categoryId = c.id),
             ),
@@ -255,24 +283,25 @@ class _PosScreenState extends State<PosScreen> {
                     ? const EmptyState(icon: Icons.search_off, title: 'No products found')
                     : RefreshIndicator(
                         onRefresh: catalog.load,
-                        child: _view == 'list' ? _list(products, cats) : _grid(products, cats),
+                        child: _view == 'list' ? _list(products, cats, hPad, wide) : _grid(products, cats, hPad, wide),
                       ),
       ),
     ]);
   }
 
-  Widget _grid(List<Product> products, List<Category> cats) => LayoutBuilder(builder: (context, box) {
-        final cols = (box.maxWidth / 215).floor().clamp(2, 8);
+  Widget _grid(List<Product> products, List<Category> cats, double hPad, bool wide) => LayoutBuilder(builder: (context, box) {
+        final cols = (box.maxWidth / (wide ? 210 : 170)).floor().clamp(2, 8);
+        final imageH = wide ? 112.0 : 88.0;
         return GridView.builder(
-          padding: const EdgeInsets.fromLTRB(8, 4, 8, 16),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 10, crossAxisSpacing: 10, mainAxisExtent: 252),
+          padding: EdgeInsets.fromLTRB(hPad, 4, hPad, wide ? 16 : 100),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: cols, mainAxisSpacing: 12, crossAxisSpacing: 12, mainAxisExtent: imageH + 104),
           itemCount: products.length,
-          itemBuilder: (_, i) => _ProductCard(product: products[i], onAdd: () => _addProduct(products[i])),
+          itemBuilder: (_, i) => _ProductCard(product: products[i], imageHeight: imageH, onAdd: () => _addProduct(products[i])),
         );
       });
 
-  Widget _list(List<Product> products, List<Category> cats) => ListView.separated(
-        padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+  Widget _list(List<Product> products, List<Category> cats, double hPad, bool wide) => ListView.separated(
+        padding: EdgeInsets.fromLTRB(hPad, 4, hPad, wide ? 16 : 100),
         itemCount: products.length,
         separatorBuilder: (_, _) => const SizedBox(height: 8),
         itemBuilder: (_, i) {
@@ -280,14 +309,14 @@ class _PosScreenState extends State<PosScreen> {
           return Card(
             child: ListTile(
               contentPadding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
-              leading: SizedBox(width: 52, height: 52, child: ProductImage(url: p.imageUrl, radius: BorderRadius.circular(10), iconSize: 20)),
-              title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+              leading: SizedBox(width: 52, height: 52, child: ProductImage(url: p.imageUrl, radius: BorderRadius.circular(14), iconSize: 20)),
+              title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.w700)),
               subtitle: Row(children: [
-                Text(money(p.price), style: const TextStyle(color: AppColors.price, fontWeight: FontWeight.w700)),
+                Text(money(p.price), style: const TextStyle(color: AppColors.price, fontWeight: FontWeight.w800)),
                 const SizedBox(width: 10),
                 if (p.trackStock && !p.isExpense) _StockText(p),
               ]),
-              trailing: SizedBox(width: 150, child: _AddOrStepper(product: p, onAdd: () => _addProduct(p))),
+              trailing: _AddOrStepper(product: p, onAdd: () => _addProduct(p)),
             ),
           );
         },
@@ -304,124 +333,7 @@ class _StockText extends StatelessWidget {
       );
 }
 
-/// Collapsible "Order Details" card: storage/counter (table), customer, mobile, loyalty.
-class _OrderDetailsCard extends StatelessWidget {
-  final bool open;
-  final VoidCallback onToggle;
-  final Cart cart;
-  const _OrderDetailsCard({required this.open, required this.onToggle, required this.cart});
-
-  Future<void> _pickTable(BuildContext context) async {
-    final s = context.read<Session>();
-    final tables = {...?s.activeBranch?.tableNames, ...?s.shop?.settings.tableNames}.toList();
-    final t = await showModalBottomSheet<String>(
-      context: context,
-      builder: (c) => SafeArea(
-        child: ListView(shrinkWrap: true, children: [
-          const ListTile(title: Text('Storage / Counter', style: TextStyle(fontWeight: FontWeight.w700))),
-          ListTile(leading: const Icon(Icons.block), title: const Text('Not Selected'), onTap: () => Navigator.pop(c, '')),
-          if (tables.isEmpty) const ListTile(title: Text('Add tables / counters in Settings or Branches')),
-          for (final t in tables) ListTile(leading: const Icon(Icons.table_restaurant_outlined), title: Text(t), selected: cart.tableName == t, onTap: () => Navigator.pop(c, t)),
-        ]),
-      ),
-    );
-    if (t != null) cart.setTable(t.isEmpty ? null : t);
-  }
-
-  Future<void> _pickCustomer(BuildContext context) async {
-    final c = await pickCustomer(context);
-    if (c != null) cart.setCustomer(c);
-  }
-
-  Future<void> _enterMobile(BuildContext context) async {
-    final ctrl = TextEditingController(text: cart.customerPhone);
-    final v = await showDialog<String>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Customer Mobile'),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          keyboardType: TextInputType.phone,
-          maxLength: 10,
-          decoration: const InputDecoration(labelText: 'Mobile Number *', prefixIcon: Icon(Icons.phone_android)),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(c, ctrl.text.trim()), child: const Text('OK')),
-        ],
-      ),
-    );
-    if (v == null || !context.mounted) return;
-    if (v.isEmpty) return cart.setCustomer(null);
-    if (!RegExp(r'^\d{10}$').hasMatch(v)) return showSnack(context, 'Must be 10 digits', error: true);
-    try {
-      cart.setCustomer(Customer(Map<String, dynamic>.from(await Api.instance.get('/customers/phone/$v'))));
-    } on ApiException catch (e) {
-      if (e.status == 404) cart.setCustomer(null, phone: v, name: 'New Customer');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final customer = cart.customer?.name ?? (cart.customerPhone?.length == 10 ? (cart.customerName ?? 'New Customer') : 'Walk-in');
-    Widget cell(IconData icon, Color color, String label, String value, VoidCallback? onTap) => Expanded(
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(10),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-              child: Row(children: [
-                IconTile(icon, color, size: 36),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(label, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
-                    Text(value, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15), maxLines: 1, overflow: TextOverflow.ellipsis),
-                  ]),
-                ),
-              ]),
-            ),
-          ),
-        );
-    return Container(
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.border)),
-      padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-      child: Column(children: [
-        InkWell(
-          onTap: onToggle,
-          child: Row(children: [
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Order Details', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                Text('Storage / Counter: ${cart.tableName ?? 'Not Selected'} • Customer: $customer',
-                    style: const TextStyle(fontSize: 12, color: AppColors.muted), maxLines: 1, overflow: TextOverflow.ellipsis),
-              ]),
-            ),
-            Icon(open ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
-            const SizedBox(width: 8),
-          ]),
-        ),
-        if (open) ...[
-          const SizedBox(height: 6),
-          Row(children: [
-            cell(Icons.storefront, AppColors.blue, 'Storage / Counter', cart.tableName ?? 'Not Selected', () => _pickTable(context)),
-            Container(width: 1, height: 40, color: AppColors.border),
-            cell(Icons.person, AppColors.green, 'Customer', customer, () => _pickCustomer(context)),
-          ]),
-          const Divider(height: 1),
-          Row(children: [
-            cell(Icons.phone_android, AppColors.orange, 'Mobile', cart.customerPhone ?? 'N/A', () => _enterMobile(context)),
-            Container(width: 1, height: 40, color: AppColors.border),
-            cell(Icons.stars_rounded, const Color(0xFFD4A017), 'Loyalty Points', (cart.customer?.loyaltyPoints ?? 0).toStringAsFixed(1), null),
-          ]),
-        ],
-      ]),
-    );
-  }
-}
-
-/// "+ Add" button, or − qty + stepper when the item is already in the cart.
+/// Lime "+" button, or a blue − qty + stepper when the item is already in the cart.
 class _AddOrStepper extends StatelessWidget {
   final Product product;
   final VoidCallback onAdd;
@@ -432,101 +344,115 @@ class _AddOrStepper extends StatelessWidget {
     final cart = context.watch<Cart>();
     final line = cart.lines.where((l) => l.productId == product.id).firstOrNull;
     if (line == null) {
-      return SizedBox(
-        height: 34,
-        width: double.infinity,
-        child: TextButton.icon(
-          onPressed: onAdd,
-          icon: const Icon(Icons.add, size: 16),
-          label: const Text('Add'),
-          style: TextButton.styleFrom(
-            backgroundColor: const Color(0xFFEAF2FE),
-            foregroundColor: AppColors.blue,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: const BorderSide(color: Color(0xFFC9DCF8))),
-          ),
-        ),
+      return IconButton.filled(
+        tooltip: 'Add to cart',
+        onPressed: onAdd,
+        style: IconButton.styleFrom(backgroundColor: AppColors.lime, foregroundColor: AppColors.navy, fixedSize: const Size(38, 38), minimumSize: const Size(38, 38)),
+        icon: const Icon(Icons.add_rounded, size: 22),
       );
     }
     return Container(
-      height: 34,
-      decoration: BoxDecoration(color: const Color(0xFFE8F7EF), borderRadius: BorderRadius.circular(8)),
-      child: Row(children: [
-        _stepBtn(Icons.remove, AppColors.danger, () => cart.setQty(line, line.quantity - 1)),
-        Expanded(
-          child: InkWell(
-            onTap: () async {
-              final v = await askNumber(context, 'Set Quantity (${line.name})', label: 'Quantity', initial: line.quantity);
-              if (v != null) cart.setQty(line, v);
-            },
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Text(qty(line.quantity), style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.green)),
-              const SizedBox(width: 2),
-              const Icon(Icons.edit, size: 11, color: AppColors.green),
-            ]),
+      height: 38,
+      decoration: BoxDecoration(color: AppColors.blue, borderRadius: BorderRadius.circular(12)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        _stepBtn(Icons.remove_rounded, 'Remove one', () => cart.setQty(line, line.quantity - 1)),
+        InkWell(
+          onTap: () async {
+            final v = await askNumber(context, 'Set Quantity (${line.name})', label: 'Quantity', initial: line.quantity);
+            if (v != null) cart.setQty(line, v);
+          },
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 18),
+            child: Text(qty(line.quantity), textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.lime, fontSize: 14)),
           ),
         ),
-        _stepBtn(Icons.add, AppColors.green, () => cart.setQty(line, line.quantity + 1)),
+        _stepBtn(Icons.add_rounded, 'Add one more', () => cart.setQty(line, line.quantity + 1)),
       ]),
     );
   }
 
-  Widget _stepBtn(IconData icon, Color color, VoidCallback onTap) => InkWell(
-        onTap: onTap,
-        child: Container(
-          width: 36,
-          decoration: BoxDecoration(color: color.withValues(alpha: .15), borderRadius: BorderRadius.circular(8)),
-          child: Icon(icon, size: 18, color: color),
+  Widget _stepBtn(IconData icon, String tip, VoidCallback onTap) => Tooltip(
+        message: tip,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: SizedBox(width: 32, height: 38, child: Icon(icon, size: 18, color: Colors.white)),
         ),
       );
 }
 
+/// Stock pill on the product photo: "48 in stock", amber "Only 6 left", coral "Out of stock".
+class _StockBadge extends StatelessWidget {
+  final Product p;
+  const _StockBadge(this.p);
+
+  @override
+  Widget build(BuildContext context) {
+    final out = p.stock <= 0;
+    final low = !out && p.isLowStock;
+    final (bg, fg, label) = out
+        ? (AppColors.danger, Colors.white, 'Out of stock')
+        : low
+            ? (AppColors.amber, AppColors.navy, 'Only ${qty(p.stock)} left')
+            : (Colors.white.withValues(alpha: .92), AppColors.navy, '${qty(p.stock)} in stock');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
+      child: Text(label, style: TextStyle(color: fg, fontSize: 10, fontWeight: FontWeight.w800)),
+    );
+  }
+}
+
 class _ProductCard extends StatelessWidget {
   final Product product;
+  final double imageHeight;
   final VoidCallback onAdd;
-  const _ProductCard({required this.product, required this.onAdd});
+  const _ProductCard({required this.product, required this.imageHeight, required this.onAdd});
 
   @override
   Widget build(BuildContext context) {
     final p = product;
-    final cats = context.read<Catalog>().categories;
-    final catIndex = cats.indexWhere((c) => c.id == p.categoryId);
-    final inCart = context.select<Cart, double>((cart) => cart.lines.where((l) => l.productId == p.id).fold(0.0, (s, l) => s + l.quantity));
+    final inCart = context.select<Cart, bool>((cart) => cart.lines.any((l) => l.productId == p.id));
     return Material(
-      color: inCart > 0 ? const Color(0xFFF2FBF6) : Colors.white,
+      color: Colors.white,
+      elevation: 1.5,
+      shadowColor: AppColors.navy.withValues(alpha: .14),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: inCart > 0 ? AppColors.green : AppColors.border, width: inCart > 0 ? 2 : 1),
+        borderRadius: BorderRadius.circular(22),
+        side: inCart ? const BorderSide(color: AppColors.blue, width: 1.6) : BorderSide.none,
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onAdd,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          SizedBox(
-            height: 112,
-            child: Stack(fit: StackFit.expand, children: [
-              ProductImage(url: p.imageUrl),
-              if (p.categoryName != null)
-                Positioned(left: 6, top: 6, child: CornerBadge(p.categoryName!, color: catIndex < 0 ? const Color(0xCC5F6368) : AppColors.forIndex(catIndex).withValues(alpha: .85))),
-              if (inCart > 0) Positioned(right: 6, top: 6, child: CornerBadge('${qty(inCart)} in Cart', color: AppColors.green)),
-            ]),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 8, 8, 6),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(p.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                const Spacer(),
-                Row(children: [
-                  Text(money(p.price).replaceAll('.00', ''), style: const TextStyle(color: AppColors.price, fontWeight: FontWeight.w700, fontSize: 15)),
-                  const Spacer(),
-                  if (p.trackStock && !p.isExpense) _StockText(p),
-                ]),
-                const SizedBox(height: 8),
-                _AddOrStepper(product: p, onAdd: onAdd),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(6, 6, 6, 8),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            SizedBox(
+              height: imageHeight,
+              child: Stack(fit: StackFit.expand, children: [
+                ProductImage(url: p.imageUrl, radius: BorderRadius.circular(17)),
+                if (p.trackStock && !p.isExpense) Positioned(left: 6, top: 6, child: _StockBadge(p)),
               ]),
             ),
-          ),
-        ]),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: SizedBox(
+                height: 36,
+                child: Text(p.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, height: 1.35)),
+              ),
+            ),
+            const Spacer(),
+            Row(children: [
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(money(p.price).replaceAll('.00', ''),
+                    maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.price, fontWeight: FontWeight.w800, fontSize: 16, letterSpacing: -0.3)),
+              ),
+              _AddOrStepper(product: p, onAdd: onAdd),
+            ]),
+          ]),
+        ),
       ),
     );
   }
@@ -548,13 +474,341 @@ class _WaitingListSheet extends StatelessWidget {
                   : ListView(children: [
                       for (final b in bills)
                         ListTile(
-                          leading: CircleAvatar(backgroundColor: const Color(0xFFFFF1E0), child: Text(b.tableName?.characters.first ?? '#', style: const TextStyle(color: StatusColors.waiting))),
+                          leading: CircleAvatar(backgroundColor: AppColors.amber, child: Text(b.tableName?.characters.first ?? '#', style: const TextStyle(color: AppColors.navy, fontWeight: FontWeight.w800))),
                           title: Text('${b.tableName ?? 'Order'} • #${b.billNo.split('-').last}'),
                           subtitle: Text('${b.items.length} items • ${dateTime(b.billDate)}${b.customerName != null ? ' • ${b.customerName}' : ''}'),
                           trailing: Text(money(b.total), style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.blue)),
                           onTap: () => Navigator.pop(context, b),
                         ),
                     ]),
+            ),
+          ),
+        ]),
+      );
+}
+
+class _NavDest {
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool selected;
+  const _NavDest(this.label, this.icon, this.onTap, {this.selected = false});
+}
+
+/// OnePe Blue POS header on the brand's lime stepped edge. Phone: logo, branch, sync, profile and
+/// the order row (customer / table / new order). Wide: logo-less title row with search and Waiting.
+class _PosHeader extends StatelessWidget {
+  final bool wide;
+  final int pending;
+  final VoidCallback onSync;
+  final VoidCallback onWaiting;
+  final Widget? search;
+  const _PosHeader({required this.wide, required this.pending, required this.onSync, required this.onWaiting, this.search});
+
+  static ButtonStyle _glass([double? w]) => IconButton.styleFrom(
+        backgroundColor: Colors.white.withValues(alpha: .14),
+        foregroundColor: Colors.white,
+        fixedSize: Size(w ?? 44, 44),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final session = context.watch<Session>();
+    final cart = context.watch<Cart>();
+    final canSwitch = session.branches.length > 1 && (session.user?.isAdminOrManager ?? false);
+    final title = Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+      Text(session.shop?.name ?? 'OnePe POS',
+          maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: wide ? 21 : 17, letterSpacing: -0.3)),
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        Flexible(
+          child: Text(session.activeBranch?.name ?? 'Main Branch',
+              maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.lime, fontWeight: FontWeight.w700, fontSize: 12)),
+        ),
+        if (canSwitch) const Icon(Icons.expand_more_rounded, color: AppColors.lime, size: 16),
+      ]),
+    ]);
+    final branch = canSwitch
+        ? PopupMenuButton<String>(
+            tooltip: 'Switch outlet',
+            onSelected: session.switchBranch,
+            itemBuilder: (_) => [for (final b in session.branches) CheckedPopupMenuItem(value: b.id, checked: b.id == session.activeBranchId, child: Text(b.name))],
+            child: title,
+          )
+        : title;
+    final sync = IconButton(
+      tooltip: pending > 0 ? 'Sync $pending offline bill(s)' : 'Sync Cloud Data',
+      onPressed: onSync,
+      style: _glass(),
+      icon: Badge(
+        isLabelVisible: pending > 0,
+        backgroundColor: AppColors.amber,
+        textColor: AppColors.navy,
+        label: Text('$pending'),
+        child: const Icon(Icons.sync_rounded, size: 21),
+      ),
+    );
+    final profile = PopupMenuButton<String>(
+      tooltip: 'Profile',
+      onSelected: (v) => v == 'logout' ? session.logout() : null,
+      itemBuilder: (_) => [
+        PopupMenuItem(enabled: false, child: Text('${session.user?.name}\n${session.user?.role.replaceAll('_', ' ')}')),
+        const PopupMenuItem(value: 'logout', child: Text('Logout')),
+      ],
+      child: Container(
+        width: 44,
+        height: 44,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(color: AppColors.lime, borderRadius: BorderRadius.circular(14)),
+        child: Text(initials(session.user?.name), style: const TextStyle(color: AppColors.navy, fontWeight: FontWeight.w800, fontSize: 13)),
+      ),
+    );
+
+    if (wide) {
+      return _LimeStep(
+        radius: 26,
+        child: Container(
+          height: 84,
+          padding: const EdgeInsets.fromLTRB(22, 0, 14, 0),
+          decoration: BoxDecoration(color: AppColors.blue, borderRadius: BorderRadius.circular(26)),
+          child: Row(children: [
+            Expanded(child: Align(alignment: Alignment.centerLeft, child: branch)),
+            const SizedBox(width: 16),
+            Flexible(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 400), child: search)),
+            const SizedBox(width: 12),
+            TextButton.icon(
+              onPressed: onWaiting,
+              style: TextButton.styleFrom(
+                backgroundColor: Colors.white.withValues(alpha: .14),
+                foregroundColor: Colors.white,
+                minimumSize: const Size(0, 44),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              icon: const Icon(Icons.pending_actions_rounded, size: 18),
+              label: const Text('Waiting'),
+            ),
+            const SizedBox(width: 8),
+            sync,
+            const SizedBox(width: 8),
+            profile,
+          ]),
+        ),
+      );
+    }
+
+    final customerName = cart.customer?.name ?? (cart.customerPhone?.length == 10 ? (cart.customerName ?? 'New Customer') : 'Walk-in');
+    return _LimeStep(
+      radius: 28,
+      top: false,
+      child: Container(
+        padding: EdgeInsets.fromLTRB(10, MediaQuery.of(context).padding.top + 6, 12, 42),
+        decoration: const BoxDecoration(color: AppColors.blue, borderRadius: BorderRadius.vertical(bottom: Radius.circular(28))),
+        child: Column(children: [
+          SizedBox(
+            height: 48,
+            child: Row(children: [
+              const BrandLogo(height: 40, lime: true, iconOnly: true),
+              const SizedBox(width: 4),
+              Expanded(child: branch),
+              sync,
+              const SizedBox(width: 6),
+              profile,
+            ]),
+          ),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(
+              child: Material(
+                color: Colors.white.withValues(alpha: .14),
+                borderRadius: BorderRadius.circular(14),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () async {
+                    final c = await pickCustomer(context);
+                    if (c != null) cart.setCustomer(c);
+                  },
+                  child: SizedBox(
+                    height: 44,
+                    child: Row(children: [
+                      const SizedBox(width: 10),
+                      const Icon(Icons.person_rounded, color: Colors.white, size: 20),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(customerName,
+                            maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
+                      ),
+                      Container(
+                        height: 30,
+                        margin: const EdgeInsets.only(right: 7),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(color: AppColors.lime, borderRadius: BorderRadius.circular(10)),
+                        child: Text(cart.hasCustomer ? 'Change' : 'Search / Add',
+                            style: const TextStyle(color: AppColors.navy, fontWeight: FontWeight.w800, fontSize: 12)),
+                      ),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton.icon(
+              onPressed: () => pickTable(context, cart),
+              style: TextButton.styleFrom(
+                backgroundColor: Colors.white.withValues(alpha: .14),
+                foregroundColor: Colors.white,
+                minimumSize: const Size(0, 44),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              icon: const Icon(Icons.table_restaurant_rounded, size: 18),
+              label: Text(cart.tableName ?? 'Table', style: const TextStyle(fontSize: 13)),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              tooltip: 'New Order',
+              onPressed: () {
+                cart.clear();
+                showSnack(context, 'New order started.');
+              },
+              style: IconButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: AppColors.blue,
+                fixedSize: const Size(44, 44),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              icon: const Icon(Icons.add_rounded, size: 24),
+            ),
+          ]),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Brand element: a lime strip stepping out from under a blue panel's lower-left edge.
+class _LimeStep extends StatelessWidget {
+  final Widget child;
+  final double radius;
+  final bool top;
+  const _LimeStep({required this.child, required this.radius, this.top = true});
+
+  @override
+  Widget build(BuildContext context) => Stack(children: [
+        Positioned(
+          left: 0,
+          bottom: 0,
+          width: MediaQuery.of(context).size.width * (top ? .28 : .62),
+          height: 56,
+          child: Container(
+            decoration: BoxDecoration(
+              color: AppColors.lime,
+              borderRadius: BorderRadius.only(bottomLeft: Radius.circular(top ? radius : 0), bottomRight: Radius.circular(radius)),
+            ),
+          ),
+        ),
+        Padding(padding: const EdgeInsets.only(bottom: 7), child: child),
+      ]);
+}
+
+/// Navy side menu (web / tablet) with the lime OnePe icon.
+class _SideRail extends StatelessWidget {
+  final List<_NavDest> items;
+  final VoidCallback onMore;
+  const _SideRail({required this.items, required this.onMore});
+
+  Widget _item(_NavDest d) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Material(
+          color: d.selected ? AppColors.blue : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: d.onTap,
+            child: SizedBox(
+              width: 68,
+              height: 62,
+              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Icon(d.icon, color: d.selected ? AppColors.lime : const Color(0xFFB9C4D8), size: 23),
+                const SizedBox(height: 4),
+                Text(d.label, style: TextStyle(color: d.selected ? Colors.white : const Color(0xFFB9C4D8), fontSize: 11, fontWeight: FontWeight.w700)),
+              ]),
+            ),
+          ),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: 86,
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(color: AppColors.navy, borderRadius: BorderRadius.circular(26)),
+        child: Column(children: [
+          const BrandLogo(height: 60, lime: true, iconOnly: true),
+          const SizedBox(height: 10),
+          Expanded(child: SingleChildScrollView(child: Column(children: [for (final d in items) _item(d)]))),
+          _item(_NavDest('More', Icons.menu_rounded, onMore)),
+        ]),
+      );
+}
+
+/// Floating navy bottom bar (phone): Sell · Bills · Reports · More, plus the lime cart button.
+class _Dock extends StatelessWidget {
+  final List<_NavDest> items;
+  final VoidCallback onMore;
+  final double cartCount;
+  final double cartTotal;
+  final VoidCallback onCart;
+  const _Dock({required this.items, required this.onMore, required this.cartCount, required this.cartTotal, required this.onCart});
+
+  Widget _icon(_NavDest d) => Tooltip(
+        message: d.label,
+        child: Material(
+          color: d.selected ? AppColors.blue : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: d.onTap,
+            child: SizedBox(width: 46, height: 46, child: Icon(d.icon, color: d.selected ? AppColors.lime : const Color(0xFFB9C4D8), size: 23)),
+          ),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) => Container(
+        height: 64,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: AppColors.navy,
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: [BoxShadow(color: AppColors.navy.withValues(alpha: .35), blurRadius: 24, offset: const Offset(0, 10))],
+        ),
+        child: Row(children: [
+          for (final d in items) _icon(d),
+          _icon(_NavDest('More', Icons.more_horiz_rounded, onMore)),
+          const Spacer(),
+          Material(
+            color: AppColors.lime,
+            borderRadius: BorderRadius.circular(16),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: onCart,
+              child: Container(
+                height: 48,
+                padding: const EdgeInsets.fromLTRB(8, 0, 12, 0),
+                child: Row(children: [
+                  Container(
+                    constraints: const BoxConstraints(minWidth: 30),
+                    height: 30,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(color: AppColors.blue, borderRadius: BorderRadius.circular(10)),
+                    child: Text(qty(cartCount), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(money(cartTotal).replaceAll('.00', ''), style: const TextStyle(color: AppColors.navy, fontWeight: FontWeight.w800, fontSize: 15, letterSpacing: -0.3)),
+                ]),
+              ),
             ),
           ),
         ]),

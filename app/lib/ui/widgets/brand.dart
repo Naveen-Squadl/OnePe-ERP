@@ -5,7 +5,25 @@ import '../../core/api.dart';
 import '../../core/theme.dart';
 import 'common.dart';
 
-/// Blue gradient app bar with white, centred title (used on every screen).
+/// OnePe logo from the brand assets. [lime] for blue/navy backgrounds, blue for light ones;
+/// [iconOnly] shows just the "1" brand icon (UI / compact use per the brand guide).
+class BrandLogo extends StatelessWidget {
+  final double height;
+  final bool lime;
+  final bool iconOnly;
+  const BrandLogo({super.key, this.height = 32, this.lime = false, this.iconOnly = false});
+
+  @override
+  Widget build(BuildContext context) => Image.asset(
+        'assets/brand/${iconOnly ? 'icon' : 'logo'}_${lime ? 'lime' : 'blue'}.png',
+        height: height,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.medium,
+        semanticLabel: 'OnePe',
+      );
+}
+
+/// OnePe Blue app bar with white title and rounded lower corners (used on every inner screen).
 class GradientAppBar extends StatelessWidget implements PreferredSizeWidget {
   final Widget? title;
   final Widget? leading;
@@ -25,12 +43,12 @@ class GradientAppBar extends StatelessWidget implements PreferredSizeWidget {
         actions: actions,
         bottom: bottom,
         automaticallyImplyLeading: leading == null,
-        backgroundColor: Colors.transparent,
-        flexibleSpace: Container(decoration: const BoxDecoration(gradient: AppColors.headerGradient)),
+        backgroundColor: AppColors.blue,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(bottom: Radius.circular(22))),
       );
 }
 
-/// Green gradient primary action ("Proceed to Payment", "Add Product" ...).
+/// Lime primary action with navy label ("Charge", "Add Product" ...). Name kept from the old theme.
 class GreenButton extends StatelessWidget {
   final String label;
   final IconData? icon;
@@ -45,21 +63,22 @@ class GreenButton extends StatelessWidget {
     return Opacity(
       opacity: enabled ? 1 : .55,
       child: Material(
-        borderRadius: BorderRadius.circular(14),
+        color: AppColors.lime,
+        borderRadius: BorderRadius.circular(18),
         clipBehavior: Clip.antiAlias,
-        elevation: enabled ? 3 : 0,
-        shadowColor: AppColors.green.withValues(alpha: .4),
-        child: Ink(
-          height: height,
-          decoration: const BoxDecoration(gradient: AppColors.greenGradient),
-          child: InkWell(
-            onTap: enabled ? onPressed : null,
+        child: InkWell(
+          onTap: enabled ? onPressed : null,
+          child: SizedBox(
+            height: height,
             child: Center(
               child: busy
-                  ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: AppColors.navy))
                   : Row(mainAxisSize: MainAxisSize.min, children: [
-                      if (icon != null) ...[Icon(icon, color: Colors.white), const SizedBox(width: 10)],
-                      Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 17)),
+                      if (icon != null) ...[Icon(icon, color: AppColors.navy), const SizedBox(width: 10)],
+                      Flexible(
+                        child: Text(label,
+                            maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.navy, fontWeight: FontWeight.w800, fontSize: 16)),
+                      ),
                     ]),
             ),
           ),
@@ -69,7 +88,7 @@ class GreenButton extends StatelessWidget {
   }
 }
 
-/// Outlined green action ("Apply Bill Discount").
+/// Outlined secondary action ("Apply Bill Discount").
 class GreenOutlineButton extends StatelessWidget {
   final String label;
   final IconData icon;
@@ -82,14 +101,14 @@ class GreenOutlineButton extends StatelessWidget {
         icon: Icon(icon, size: 18),
         label: Text(label),
         style: OutlinedButton.styleFrom(
-          foregroundColor: AppColors.green,
-          side: const BorderSide(color: AppColors.green, width: 1.2),
-          minimumSize: const Size.fromHeight(50),
+          foregroundColor: AppColors.blue,
+          side: const BorderSide(color: AppColors.blue, width: 1.4),
+          minimumSize: const Size.fromHeight(48),
         ),
       );
 }
 
-/// Pill-shaped category filter with a coloured dot.
+/// Category filter: white rounded pill with a coloured dot; selected = solid OnePe Blue.
 class CategoryChip extends StatelessWidget {
   final String label;
   final Color color;
@@ -99,23 +118,23 @@ class CategoryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = selected ? AppColors.blue : color.withValues(alpha: .10);
+    final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(12));
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: Material(
-        color: bg,
-        shape: StadiumBorder(side: BorderSide(color: selected ? AppColors.blue : color.withValues(alpha: .45))),
-        elevation: selected ? 3 : 0,
-        shadowColor: AppColors.blue.withValues(alpha: .4),
+        color: selected ? AppColors.blue : Colors.white,
+        shape: shape,
+        elevation: selected ? 0 : 1,
+        shadowColor: AppColors.navy.withValues(alpha: .15),
         child: InkWell(
-          customBorder: const StadiumBorder(),
+          customBorder: shape,
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            padding: const EdgeInsets.fromLTRB(11, 9, 14, 9),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Container(width: 8, height: 8, decoration: BoxDecoration(color: selected ? Colors.white : color, shape: BoxShape.circle)),
-              const SizedBox(width: 6),
-              Text(label, style: TextStyle(color: selected ? Colors.white : AppColors.text, fontWeight: selected ? FontWeight.w600 : FontWeight.w500)),
+              Container(width: 8, height: 8, decoration: BoxDecoration(color: selected ? AppColors.lime : color, shape: BoxShape.circle)),
+              const SizedBox(width: 7),
+              Text(label, style: TextStyle(color: selected ? Colors.white : AppColors.navy, fontWeight: FontWeight.w700, fontSize: 13)),
             ]),
           ),
         ),
@@ -128,17 +147,17 @@ class CategoryChip extends StatelessWidget {
 class CornerBadge extends StatelessWidget {
   final String text;
   final Color color;
-  const CornerBadge(this.text, {super.key, this.color = const Color(0xCC5F6368)});
+  const CornerBadge(this.text, {super.key, this.color = const Color(0xE6183461)});
 
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6)),
-        child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w600)),
+        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(7)),
+        child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700)),
       );
 }
 
-/// Product photo, or the default bag placeholder on a soft gradient.
+/// Product photo, or the default placeholder on brand Cream.
 class ProductImage extends StatelessWidget {
   final String? url;
   final double iconSize;
@@ -148,9 +167,9 @@ class ProductImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final placeholder = Container(
-      decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFF1F3F7), Color(0xFFE2E7F0)])),
+      color: AppColors.cream,
       alignment: Alignment.center,
-      child: Icon(Icons.shopping_bag, color: AppColors.blue.withValues(alpha: .75), size: iconSize),
+      child: Icon(Icons.image_outlined, color: const Color(0xFF8C8A5E), size: iconSize),
     );
     final full = Api.mediaUrl(url);
     final child = full == null
@@ -243,12 +262,12 @@ class _PhotoPickerBoxState extends State<PhotoPickerBox> {
   Widget build(BuildContext context) => Center(
         child: InkWell(
           onTap: _busy ? null : _menu,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(18),
           child: Container(
             width: widget.size,
             height: widget.size,
             clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(color: const Color(0xFFE6E8EC), borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFF9AA0AA))),
+            decoration: BoxDecoration(color: AppColors.cream, borderRadius: BorderRadius.circular(18), border: Border.all(color: const Color(0xFFD8D5A8))),
             child: _busy
                 ? const Center(child: CircularProgressIndicator())
                 : widget.url != null

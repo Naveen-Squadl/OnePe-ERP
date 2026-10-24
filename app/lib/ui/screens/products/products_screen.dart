@@ -122,6 +122,14 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   final ci = cats.indexWhere((c) => c.id == p.categoryId);
                   final color = ci < 0 ? AppColors.muted : AppColors.forIndex(ci);
                   final stock = _scope == 'all_branches' ? toDouble(p.raw['totalStock']) : p.stock;
+                  final narrow = MediaQuery.of(context).size.width < 600;
+                  final catTag = p.categoryName == null
+                      ? null
+                      : Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(color: color.withValues(alpha: .08), borderRadius: BorderRadius.circular(8), border: Border.all(color: color.withValues(alpha: .4))),
+                          child: Text(p.categoryName!, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w700)),
+                        );
                   return Card(
                     child: InkWell(
                       borderRadius: BorderRadius.circular(14),
@@ -139,7 +147,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                           const SizedBox(width: 14),
                           Expanded(
                             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Text(p.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                              Text(p.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
                               const SizedBox(height: 4),
                               Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 6, runSpacing: 4, children: [
                                 Text(money(p.price).replaceAll('.00', ''), style: const TextStyle(color: AppColors.price, fontWeight: FontWeight.w700)),
@@ -159,19 +167,32 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                     ]),
                                   ),
                                 if (p.barcode != null) Text('• ${p.barcode}', style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+                                if (narrow && catTag != null) catTag,
                               ]),
                             ]),
                           ),
-                          if (p.categoryName != null)
-                            Container(
-                              margin: const EdgeInsets.only(right: 8),
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(color: color.withValues(alpha: .08), borderRadius: BorderRadius.circular(8), border: Border.all(color: color.withValues(alpha: .4))),
-                              child: Text(p.categoryName!, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600)),
-                            ),
-                          RowAction(Icons.print, const Color(0xFF8E44AD), 'Print Barcode', () => _printLabel(p)),
-                          RowAction(Icons.edit, AppColors.blue, 'Edit', () => _open(p)),
-                          RowAction(Icons.delete_outline, AppColors.danger, 'Delete', () => _delete(p)),
+                          if (narrow)
+                            // Phones: one menu instead of three buttons so the name keeps its width.
+                            PopupMenuButton<String>(
+                              tooltip: 'Actions',
+                              icon: const Icon(Icons.more_vert_rounded, color: AppColors.navy),
+                              onSelected: (v) => switch (v) {
+                                'print' => _printLabel(p),
+                                'edit' => _open(p),
+                                _ => _delete(p),
+                              },
+                              itemBuilder: (_) => const [
+                                PopupMenuItem(value: 'print', child: ListTile(leading: Icon(Icons.print), title: Text('Print Barcode'))),
+                                PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit, color: AppColors.blue), title: Text('Edit'))),
+                                PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, color: AppColors.danger), title: Text('Delete'))),
+                              ],
+                            )
+                          else ...[
+                            if (catTag != null) Padding(padding: const EdgeInsets.only(right: 8), child: catTag),
+                            RowAction(Icons.print, AppColors.navy, 'Print Barcode', () => _printLabel(p)),
+                            RowAction(Icons.edit, AppColors.blue, 'Edit', () => _open(p)),
+                            RowAction(Icons.delete_outline, AppColors.danger, 'Delete', () => _delete(p)),
+                          ],
                         ]),
                       ),
                     ),
@@ -198,7 +219,7 @@ class _RoundSearch extends StatelessWidget {
         decoration: InputDecoration(
           hintText: hint,
           prefixIcon: const Icon(Icons.search),
-          fillColor: const Color(0xFFF0F3F8),
+          fillColor: AppColors.bg,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: AppColors.border)),
           enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: AppColors.border)),
           isDense: true,

@@ -112,7 +112,7 @@ class _UsersScreenState extends State<UsersScreen> {
                     child: Row(children: [
                       CircleAvatar(
                         radius: 24,
-                        backgroundColor: u['role'] == 'ADMIN' ? const Color(0xFFEDEFF2) : const Color(0xFFE6F6EE),
+                        backgroundColor: u['role'] == 'ADMIN' ? AppColors.bg : AppColors.blueTint,
                         child: Icon(u['role'] == 'ADMIN' ? Icons.person : Icons.point_of_sale, color: u['role'] == 'ADMIN' ? AppColors.muted : AppColors.green),
                       ),
                       const SizedBox(width: 14),
@@ -122,12 +122,12 @@ class _UsersScreenState extends State<UsersScreen> {
                           const SizedBox(height: 2),
                           Wrap(spacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
                             const Icon(Icons.mail_outline, size: 13, color: AppColors.muted),
-                            Text(u['email'], style: const TextStyle(fontSize: 13, color: Color(0xFF5F6368))),
+                            Text(u['email'], style: const TextStyle(fontSize: 13, color: AppColors.muted)),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                              decoration: BoxDecoration(color: (u['isActive'] == true ? const Color(0xFFFFF4D6) : const Color(0xFFEDEFF2)), borderRadius: BorderRadius.circular(6)),
+                              decoration: BoxDecoration(color: (u['isActive'] == true ? Color(0xFFFFF1CC) : AppColors.bg), borderRadius: BorderRadius.circular(6)),
                               child: Text(u['isActive'] == true ? '⚡ Active' : 'Inactive',
-                                  style: TextStyle(fontSize: 11, color: u['isActive'] == true ? const Color(0xFFE08A00) : AppColors.muted, fontWeight: FontWeight.w600)),
+                                  style: TextStyle(fontSize: 11, color: u['isActive'] == true ? AppColors.orange : AppColors.muted, fontWeight: FontWeight.w600)),
                             ),
                             Text('• ${branchName[u['branchId']] ?? 'All outlets'}', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
                           ]),

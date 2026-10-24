@@ -55,6 +55,12 @@ test('pure totals: GST exclusive / inclusive, discounts, loyalty', () => {
   const t = computeTotals([{ taxableAmount: 200, gstAmount: 10, discount: 0 }], 'percent', 10, 5);
   assert.equal(t.discount, 21);
   assert.equal(t.total, 184);
+  const r = computeTotals([{ taxableAmount: 435.6, gstAmount: 0, discount: 0 }], 'flat', 0, 0, 'down');
+  assert.equal(r.total, 435);
+  assert.equal(r.roundOff, -0.6);
+  const u = computeTotals([{ taxableAmount: 435.6, gstAmount: 0, discount: 0 }], 'flat', 0, 0, 'up');
+  assert.equal(u.total, 436);
+  assert.equal(u.roundOff, 0.4);
 });
 
 test('full sale lifecycle: credit sale, payment, edit, cancel, restore, delete', async () => {

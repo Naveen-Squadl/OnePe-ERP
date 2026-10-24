@@ -174,7 +174,7 @@ class _ProductDialogState extends State<_ProductDialog> {
                     Wrap(spacing: 8, children: [
                       OutlinedButton.icon(onPressed: _autoBarcode, icon: const Icon(Icons.auto_awesome, size: 16), label: const Text('Auto-Generate')),
                       OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFF8E44AD)),
+                        style: OutlinedButton.styleFrom(foregroundColor: AppColors.navy),
                         onPressed: _barcode.text.trim().isEmpty
                             ? null
                             : () => PrintService.printBarcodeLabel(name: _name.text.isEmpty ? 'Product' : _name.text, code: _barcode.text.trim(), price: double.tryParse(_base.text) ?? 0),
@@ -317,7 +317,7 @@ class _ProductDialogState extends State<_ProductDialog> {
                 if (session.branches.length > 1) ...[
                   gap,
                   _section(
-                    color: const Color(0xFF9B51E0),
+                    color: AppColors.navy,
                     child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                       const Text('Branch Availability & Pricing', style: TextStyle(fontWeight: FontWeight.w600)),
                       const SizedBox(height: 8),
@@ -357,7 +357,7 @@ class _ProductDialogState extends State<_ProductDialog> {
   }
 
   Widget _ro(String label, String value) => InputDecorator(
-        decoration: InputDecoration(labelText: label, isDense: true, fillColor: const Color(0xFFEAF2FE)),
+        decoration: InputDecoration(labelText: label, isDense: true, fillColor: AppColors.blueTint),
         child: Text(value),
       );
 }

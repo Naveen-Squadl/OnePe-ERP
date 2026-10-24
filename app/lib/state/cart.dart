@@ -83,6 +83,10 @@ class Cart extends ChangeNotifier {
   String discountType = 'flat';
   double discountValue = 0;
   double loyaltyRedeem = 0;
+  /// Customer-selected rounding of the payable amount: 'none' | 'down' | 'up'.
+  String roundMode = 'none';
+  /// Record the full amount on the customer's account instead of as paid.
+  bool onCredit = false;
   String? note;
   DateTime? billDate;
   bool gstInclusive = false;
@@ -113,6 +117,18 @@ class Cart extends ChangeNotifier {
   }
 
   double get total => _r2(gross - billDiscount - loyaltyDiscount);
+
+  /// Payable total after rounding to a whole rupee ('none' | 'down' | 'up') – mirrors computeTotals.
+  double roundedTotal(String roundMode) => switch (roundMode) {
+        'down' => (total + 1e-9).floorToDouble(),
+        'up' => (total - 1e-9).ceilToDouble(),
+        _ => total,
+      };
+
+  bool get hasPaise => (total - total.roundToDouble()).abs() > 0.005;
+  double get payable => roundedTotal(roundMode);
+  double get roundOff => _r2(payable - total);
+  bool get hasCustomer => customer != null || (customerPhone?.length ?? 0) == 10;
 
   /// Adds a product. Throws a user-facing message if mixing sales & expense items.
   void add(Product p, {double qty = 1, double? price, String? priceType}) {
@@ -162,6 +178,7 @@ class Cart extends ChangeNotifier {
     customerPhone = c?.phone ?? phone;
     customerName = c?.name ?? name;
     loyaltyRedeem = 0;
+    if (!hasCustomer) onCredit = false;
     notifyListeners();
   }
 
@@ -181,6 +198,17 @@ class Cart extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Tapping the selected option again clears it (back to the exact amount).
+  void setRoundMode(String mode) {
+    roundMode = roundMode == mode ? 'none' : mode;
+    notifyListeners();
+  }
+
+  void setOnCredit(bool v) {
+    onCredit = v;
+    notifyListeners();
+  }
+
   void setBillDate(DateTime? d) {
     billDate = d;
     notifyListeners();
@@ -196,6 +224,8 @@ class Cart extends ChangeNotifier {
     discountType = 'flat';
     discountValue = 0;
     loyaltyRedeem = 0;
+    roundMode = 'none';
+    onCredit = false;
     note = null;
     billDate = null;
     billId = null;
@@ -259,6 +289,7 @@ class Cart extends ChangeNotifier {
         'discountType': discountType,
         'discountValue': discountValue,
         'loyaltyPointsToRedeem': loyaltyRedeem,
+        'roundMode': roundMode,
         'paymentMethod': paymentMethod,
         'receivedAmount': ?received,
         'cashAmount': cash,
@@ -314,6 +345,7 @@ class Cart extends ChangeNotifier {
       card: card,
       giveChange: giveChange,
     );
+    final payable = this.payable;
     try {
       final res = await _api.post('/bills/checkout', payload);
       final bill = Bill(Map<String, dynamic>.from(res));
@@ -325,12 +357,13 @@ class Cart extends ChangeNotifier {
       final local = Bill({
         ...payload,
         'billNo': billNo ?? 'OFFLINE',
-        'totalAmount': total,
+        'totalAmount': payable,
+        'roundOff': _r2(payable - total),
         'subtotal': subtotal,
         'totalGst': totalGst,
         'discount': billDiscount,
-        'receivedAmount': received ?? total,
-        'changeAmount': ((received ?? total) - total).clamp(0, double.infinity),
+        'receivedAmount': received ?? payable,
+        'changeAmount': ((received ?? payable) - payable).clamp(0, double.infinity),
         'billDate': DateTime.now().toIso8601String(),
         'items': lines
             .map((l) => {

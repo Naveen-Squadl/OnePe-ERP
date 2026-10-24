@@ -27,7 +27,7 @@ backend/   Node 22+/26, TypeScript, Express 5, Prisma 6.19, Zod 3, JWT, multer
   src/lib/               config, errors, permissions (role matrix), sequence (bill numbers), money, activity
   test/api.test.ts       end-to-end tests (creates & deletes its own shop)
   uploads/               product photos / logos (gitignored), served at /uploads
-app/       Flutter 3.41 / Dart 3.11, provider + go_router
+app/       Flutter 3.41 / Dart 3.11, provider + go_router (assets/brand logos, assets/fonts Manrope)
   lib/core/      api.dart (JSON client, uploadImage, mediaUrl), config.dart (API_URL), theme.dart (AppColors), format.dart
   lib/models/    models.dart (thin typed wrappers over JSON maps)
   lib/state/     session.dart (auth/tenant/branch), catalog.dart, cart.dart (mirrors server totals, offline queue)
@@ -74,6 +74,10 @@ The phone talks to the **API**, never to Postgres directly.
 - `backend/package.json` pins `@types/express-serve-static-core` 5.0.7 (dev dep + override) so `req.params` are `string`.
 - `app/pubspec.yaml` has `dependency_overrides: image: 4.9.2` because `pdf 3.12` caps `archive <4.1` (newer `image` breaks web compile).
 - Flutter web caches aggressively — when checking a rebuild in Chrome, load `http://127.0.0.1:8080/?v=N#/pos`.
-- Keep the UI visual language (see `docs/ORIGINAL_APP_REFERENCE.md`): blue gradient headers, Poppins, white rounded cards, green gradient primary buttons, coloured category chips.
+- UI follows the **OnePe brand guide** (Downloads/4. BRAND GUIDELINES): OnePe Blue `#084E8F` + Lime `#D3E278` primary, Navy `#183461`, Amber, Leaf, Cream, Coral secondary;
+  **Manrope** only (bundled in `app/assets/fonts`); logos in `app/assets/brand` (`BrandLogo` widget – lime on blue/navy, blue on white; never recolour/redraw).
+  Tokens live in `app/lib/core/theme.dart` (`AppColors`); primary action = lime with navy text (`GreenButton`, name kept); blue rounded app bars; lime "step" strip
+  under blue panels is the brand element. POS: phone = blue header + floating navy dock with lime cart button; wide (≥900) = navy side rail + cart panel.
+  Check phone layouts at 360×640 (5.5").
 - Don't add attribution/branding of the original anywhere; don't commit `.env` or `uploads/`.
 - Not a git repo yet — ask before `git init`/committing.

@@ -139,7 +139,7 @@ class _BillsScreenState extends State<BillsScreen> with SingleTickerProviderStat
                             width: 110,
                             height: 110,
                             decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: .06), blurRadius: 12)]),
-                            child: Icon(status == 'waiting' ? Icons.pending_actions : Icons.receipt_long, size: 52, color: const Color(0xFFB0B5BD)),
+                            child: Icon(status == 'waiting' ? Icons.pending_actions : Icons.receipt_long, size: 52, color: AppColors.blueTintBorder),
                           ),
                         ),
                         const SizedBox(height: 18),
@@ -203,7 +203,7 @@ class _BillCard extends StatelessWidget {
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(i, size: 14, color: color ?? AppColors.muted),
             const SizedBox(width: 6),
-            Text(t, style: TextStyle(fontSize: 13, color: color ?? const Color(0xFF5F6368))),
+            Text(t, style: TextStyle(fontSize: 13, color: color ?? AppColors.muted)),
           ]),
         );
     return Material(
@@ -373,6 +373,7 @@ Future<void> showBillDetail(BuildContext context, Bill b, Future<void> Function(
               if (b.totalGst > 0) sum('GST', money(b.totalGst).replaceAll('.00', '')),
               if (b.discount > 0) sum('Discount', '-${money(b.discount)}'),
               if (b.loyaltyRedeemed > 0) sum('Points Discount', '-${money(b.loyaltyRedeemed)}'),
+              if (b.roundOff != 0) sum('Round Off', '${b.roundOff > 0 ? '+' : '-'}${money(b.roundOff.abs())}'),
               sum('Grand Total', money(b.total).replaceAll('.00', ''), big: true),
               sum('Payment', '${b.paymentMethod} • ${money(b.received - b.change)}'),
               if (b.customerClosing != null) sum('Customer Balance', '${money(b.customerOpening)} → ${money(b.customerClosing)}'),
@@ -389,7 +390,7 @@ Future<void> showBillDetail(BuildContext context, Bill b, Future<void> Function(
               if (!b.isDeleted && !b.isCancelled && session.can('bills.create')) ...[
                 Expanded(
                   child: FilledButton.icon(
-                    style: FilledButton.styleFrom(backgroundColor: const Color(0xFF2196F3)),
+                    style: FilledButton.styleFrom(backgroundColor: AppColors.blue),
                     onPressed: () {
                       Navigator.pop(c);
                       _editBill(context, b);
@@ -479,6 +480,7 @@ Future<void> showReceiptPreview(BuildContext context, Bill b, Session session) {
                   line('Subtotal:', money(b.subtotal)),
                   if (b.totalGst > 0) line('Total GST:', money(b.totalGst)),
                   if (b.discount > 0) line('Bill Discount:', '-${money(b.discount)}'),
+                  if (b.roundOff != 0) line('Round Off:', '${b.roundOff > 0 ? '+' : '-'}${money(b.roundOff.abs())}'),
                   const Divider(),
                   line('GRAND TOTAL:', money(b.total), bold: true, size: 16),
                   const Divider(),

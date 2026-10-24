@@ -1,11 +1,11 @@
 {
-    "name": "onepe_pos",
-    "short_name": "onepe_pos",
+    "name": "OnePe POS",
+    "short_name": "OnePe POS",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#084E8F",
+    "theme_color": "#084E8F",
+    "description": "OnePe POS – billing, inventory and reports.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

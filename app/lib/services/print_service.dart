@@ -85,6 +85,7 @@ class PrintService {
           if (b.totalGst > 0) _row('Total GST:', _rs(b.totalGst)),
           if (b.discount > 0) _row('Bill Discount:', '-${_rs(b.discount)}'),
           if (b.loyaltyRedeemed > 0) _row('Points Redeemed:', '-${_rs(b.loyaltyRedeemed)}'),
+          if (b.roundOff != 0) _row('Round Off:', '${b.roundOff > 0 ? '+' : '-'}${_rs(b.roundOff.abs())}'),
           _row('GRAND TOTAL:', _rs(b.total), bold: true, size: 10),
           _row('Payment:', b.paymentMethod),
           if (b.received > 0) _row('Received:', _rs(b.received)),
@@ -182,6 +183,7 @@ class PrintService {
               _row('GST', _rs(b.totalGst), size: 10),
               if (b.discount > 0) _row('Discount', '-${_rs(b.discount)}', size: 10),
               if (b.loyaltyRedeemed > 0) _row('Points Discount', '-${_rs(b.loyaltyRedeemed)}', size: 10),
+              if (b.roundOff != 0) _row('Round Off', '${b.roundOff > 0 ? '+' : '-'}${_rs(b.roundOff.abs())}', size: 10),
               pw.Divider(),
               _row('Grand Total', _rs(b.total), bold: true, size: 12),
               _row('Amount Received', _rs(b.received - b.change), size: 10),
@@ -262,6 +264,7 @@ class PrintService {
     buf.writeln('---');
     if (b.discount > 0) buf.writeln('Discount: Rs. ${b.discount.toStringAsFixed(2)}');
     if (b.loyaltyRedeemed > 0) buf.writeln('Points Redeemed: Rs. ${b.loyaltyRedeemed.toStringAsFixed(2)}');
+    if (b.roundOff != 0) buf.writeln('Round Off: ${b.roundOff > 0 ? '+' : '-'}Rs. ${b.roundOff.abs().toStringAsFixed(2)}');
     buf.writeln('*TOTAL: Rs. ${b.total.toStringAsFixed(2)}*');
     buf.writeln('Paid: Rs. ${(b.received - b.change).toStringAsFixed(2)}');
     if (b.customerClosing != null) {

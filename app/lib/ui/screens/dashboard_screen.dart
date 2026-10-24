@@ -115,11 +115,11 @@ class BusinessSummaryView extends StatelessWidget {
     final metrics = [
       (Icons.storefront, AppColors.blue, m(d['grossSales']), 'Gross Sales'),
       (Icons.local_offer, AppColors.orange, m(d['discounts']), 'Discounts'),
-      (Icons.point_of_sale, const Color(0xFF283593), m(d['netSales']), 'Net Sales'),
+      (Icons.point_of_sale, AppColors.navy, m(d['netSales']), 'Net Sales'),
       (Icons.money_off, AppColors.danger, m(d['expenses']), 'Expenses'),
       (Icons.account_balance_wallet, AppColors.green, m(d['netCollection']), 'Net Collection'),
-      (Icons.receipt_long, const Color(0xFF00796B), '$tx', 'Transactions'),
-      (Icons.trending_up, const Color(0xFF8E24AA), m(tx == 0 ? 0 : net / tx), 'Avg. Value'),
+      (Icons.receipt_long, AppColors.green, '$tx', 'Transactions'),
+      (Icons.trending_up, AppColors.navy, m(tx == 0 ? 0 : net / tx), 'Avg. Value'),
     ];
 
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -138,14 +138,14 @@ class BusinessSummaryView extends StatelessWidget {
           const SizedBox(height: 14),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            decoration: BoxDecoration(color: const Color(0xFFE3F2FD), borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFF90CAF9))),
+            decoration: BoxDecoration(color: AppColors.blueTint, borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.blueTintBorder)),
             child: Row(children: [
-              const Icon(Icons.calculate_outlined, size: 18, color: Color(0xFF1565C0)),
+              const Icon(Icons.calculate_outlined, size: 18, color: AppColors.blue),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   'Gross (${m(d['grossSales'])}) - Discount (${m(d['discounts'])}) = Net Sales (${m(d['netSales'])}) | Net Sales - Expenses (${m(d['expenses'])}) = Net Collection (${m(d['netCollection'])})',
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF0D47A1), fontWeight: FontWeight.w500),
+                  style: const TextStyle(fontSize: 12, color: AppColors.navy, fontWeight: FontWeight.w500),
                 ),
               ),
             ]),
@@ -157,20 +157,20 @@ class BusinessSummaryView extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           _SectionTitle(
             Icons.bar_chart,
-            const Color(0xFF283593),
+            AppColors.navy,
             'Sales Trends & Velocity',
             subtitle: bucket == 'hour' ? 'Hourly lapse breakdown (1-Hour intervals)' : 'Aggregated by $bucket',
             trailing: Chip(
               avatar: const Icon(Icons.schedule, size: 16),
               label: Text(bucket == 'hour' ? '1-Hr Slots' : '${bucket[0].toUpperCase()}${bucket.substring(1)}'),
-              backgroundColor: const Color(0xFFE8EAF6),
+              backgroundColor: AppColors.blueTint,
             ),
           ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(color: const Color(0xFFF8F9FB), borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.border)),
+            decoration: BoxDecoration(color: AppColors.bg, borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.border)),
             child: Row(children: [
-              const Icon(Icons.circle, size: 10, color: Color(0xFF3949AB)),
+              const Icon(Icons.circle, size: 10, color: AppColors.blue),
               const SizedBox(width: 6),
               Text('Total: ${m(total)}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
               if (d['peak'] != null) Text('   •   Peak: ${d['peak']['label']} (${m(d['peak']['revenue'])})', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
@@ -202,7 +202,7 @@ class BusinessSummaryView extends StatelessWidget {
                       child: LinearProgressIndicator(
                         value: net == 0 ? 0 : (toDouble(e.value) / net).clamp(0, 1).toDouble(),
                         minHeight: 10,
-                        backgroundColor: const Color(0xFFEEF1F5),
+                        backgroundColor: AppColors.bg,
                         color: AppColors.blue,
                       ),
                     ),
@@ -217,7 +217,7 @@ class BusinessSummaryView extends StatelessWidget {
       const SizedBox(height: 16),
       _Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          const _SectionTitle(Icons.emoji_events, Color(0xFFD4A017), 'Top Selling Products'),
+          const _SectionTitle(Icons.emoji_events, AppColors.amberText, 'Top Selling Products'),
           if (top.isEmpty)
             const Padding(padding: EdgeInsets.all(24), child: Center(child: Text('No products sold in this period')))
           else
@@ -292,9 +292,9 @@ class _TrendChart extends StatelessWidget {
             BarChartRodData(
               toY: p.$2,
               width: points.length > 24 ? 8 : 16,
-              color: const Color(0xFF3949AB),
+              color: AppColors.blue,
               borderRadius: BorderRadius.circular(4),
-              backDrawRodData: BackgroundBarChartRodData(show: true, toY: maxY == 0 ? 100 : maxY * 1.2, color: const Color(0xFFF3F4F6)),
+              backDrawRodData: BackgroundBarChartRodData(show: true, toY: maxY == 0 ? 100 : maxY * 1.2, color: AppColors.bg),
             ),
           ]),
       ],

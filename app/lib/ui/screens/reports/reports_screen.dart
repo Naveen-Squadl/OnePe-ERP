@@ -229,7 +229,7 @@ class _ReportsViewState extends State<ReportsView> {
         const Row(children: [
           Icon(Icons.filter_alt, color: AppColors.blue),
           SizedBox(width: 8),
-          Text('Filters & Controls', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: Color(0xFF1A2A6C))),
+          Text('Filters & Controls', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.navy)),
         ]),
         const Divider(height: 22),
       ],
@@ -316,24 +316,24 @@ class _ReportsViewState extends State<ReportsView> {
   Widget _actionsCard() => _card(
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(children: [
-            const Expanded(child: Text('⚡ Quick Actions & Export', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: Color(0xFF1A2A6C)))),
+            const Expanded(child: Text('⚡ Quick Actions & Export', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.navy))),
             IconButton(tooltip: 'Refresh Report Data', onPressed: _changed, icon: const Icon(Icons.refresh, color: AppColors.blue)),
           ]),
           const Divider(height: 20),
           const Text('📥 Download & Export Hub', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
           const SizedBox(height: 10),
-          _actionBtn('Download PDF (.pdf)', Icons.picture_as_pdf, const Color(0xFFD32F2F), _pdf),
+          _actionBtn('Download PDF (.pdf)', Icons.picture_as_pdf, AppColors.danger, _pdf),
           const SizedBox(height: 8),
-          _actionBtn('Share Report (WhatsApp)', Icons.send, const Color(0xFF00796B), _whatsapp),
+          _actionBtn('Share Report (WhatsApp)', Icons.send, AppColors.green, _whatsapp),
           const Divider(height: 26),
           Container(
             padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: const Color(0xFFEDEFFC), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFC5CAF0))),
+            decoration: BoxDecoration(color: AppColors.blueTint, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.blueTintBorder)),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Row(children: [
-                Icon(Icons.analytics, size: 18, color: Color(0xFF3949AB)),
+                Icon(Icons.analytics, size: 18, color: AppColors.blue),
                 SizedBox(width: 6),
-                Text('Report Analytics', style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF1A2A6C))),
+                Text('Report Analytics', style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.navy)),
               ]),
               const SizedBox(height: 6),
               Text('Report: ${_def.longTitle}', style: const TextStyle(fontSize: 12)),
@@ -387,7 +387,7 @@ class _ReportsViewState extends State<ReportsView> {
                     Text(_subtitle, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
                     const SizedBox(height: 10),
                     FilledButton.icon(
-                      style: FilledButton.styleFrom(backgroundColor: const Color(0xFFD32F2F)),
+                      style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
                       onPressed: _pdf,
                       icon: const Icon(Icons.download),
                       label: const Text('Download PDF (.pdf)'),
@@ -398,11 +398,11 @@ class _ReportsViewState extends State<ReportsView> {
                 if (t.rows.isEmpty)
                   Container(
                     padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(color: const Color(0xFFE8F2FE), borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFF90BDF5))),
+                    decoration: BoxDecoration(color: AppColors.blueTint, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.blueTintBorder)),
                     child: Column(children: [
                       const Icon(Icons.calendar_month, size: 48, color: AppColors.blue),
                       const SizedBox(height: 8),
-                      Text('No ${_def.title} Records Found', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: Color(0xFF0D47A1))),
+                      Text('No ${_def.title} Records Found', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: AppColors.navy)),
                       const SizedBox(height: 6),
                       Text(
                         _def.dated
@@ -441,9 +441,9 @@ class _ReportsViewState extends State<ReportsView> {
                   const SizedBox(height: 12),
                   Container(
                     padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(color: const Color(0xFFEFF5FE), borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFF90BDF5))),
+                    decoration: BoxDecoration(color: AppColors.blueTint, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppColors.blueTintBorder)),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('📊 ${_def.title} Summary Total', style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF1565C0), fontSize: 16)),
+                      Text('📊 ${_def.title} Summary Total', style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.blue, fontSize: 16)),
                       const SizedBox(height: 10),
                       Wrap(spacing: 8, runSpacing: 8, children: [
                         for (final s in t.summary)
