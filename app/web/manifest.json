@@ -1,11 +1,11 @@
 {
-    "name": "OnePe POS",
-    "short_name": "OnePe POS",
+    "name": "OnePe ERP",
+    "short_name": "OnePe ERP",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#084E8F",
     "theme_color": "#084E8F",
-    "description": "OnePe POS – billing, inventory and reports.",
+    "description": "OnePe ERP – billing, inventory and reports.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

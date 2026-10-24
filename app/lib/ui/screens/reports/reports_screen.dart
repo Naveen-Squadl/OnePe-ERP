@@ -188,7 +188,7 @@ class _ReportsViewState extends State<ReportsView> {
     for (final s in t.summary) {
       buf.writeln('• ${s[0]}: ${s[1]}');
     }
-    buf.writeln('\n_Sent via OnePe POS_');
+    buf.writeln('\n_Sent via OnePe ERP_');
     await launchUrl(Uri.parse('https://wa.me/?text=${Uri.encodeComponent(buf.toString())}'), mode: LaunchMode.externalApplication);
   }
 

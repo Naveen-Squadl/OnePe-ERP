@@ -72,7 +72,7 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               const Text('Welcome back', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: -0.4)),
               const SizedBox(height: 4),
-              const Text('Sign in to your OnePe POS account', style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w500)),
+              const Text('Sign in to your OnePe ERP account', style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w500)),
               const SizedBox(height: 22),
               TextFormField(
                 controller: _email,

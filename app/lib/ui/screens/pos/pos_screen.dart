@@ -518,7 +518,7 @@ class _PosHeader extends StatelessWidget {
     final cart = context.watch<Cart>();
     final canSwitch = session.branches.length > 1 && (session.user?.isAdminOrManager ?? false);
     final title = Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-      Text(session.shop?.name ?? 'OnePe POS',
+      Text(session.shop?.name ?? 'OnePe ERP',
           maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: wide ? 21 : 17, letterSpacing: -0.3)),
       Row(mainAxisSize: MainAxisSize.min, children: [
         Flexible(

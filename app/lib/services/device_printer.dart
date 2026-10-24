@@ -13,7 +13,7 @@ class DevicePrinter {
     } on PlatformException catch (e) {
       throw e.message ?? e.code;
     } on MissingPluginException {
-      throw 'Printing on this device needs the Android app';
+      throw 'This printer is only available in the Android app';
     }
   }
 
@@ -41,7 +41,7 @@ class DevicePrinter {
     } on PlatformException catch (e) {
       throw e.message ?? e.code;
     } on MissingPluginException {
-      throw 'Bluetooth printers need the Android app';
+      throw 'Bluetooth printers are only available in the Android app';
     }
   }
 

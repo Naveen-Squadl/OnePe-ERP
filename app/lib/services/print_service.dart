@@ -16,16 +16,17 @@ import 'printer_config.dart';
 /// chosen in Printer Settings ([PrinterConfig]): the terminal's in-device printer (Nexgo), a paired
 /// Bluetooth printer, or the OS / browser print dialog.
 class PrintService {
-  /// Paper for slips that have no sheet layout (KOT, payment receipt).
-  static PaperSize get _slipPaper => PrinterConfig.paper.isSheet ? PaperSize.in3 : PrinterConfig.paper;
+  /// Paper for slips that have no sheet layout (payment receipt).
+  static PaperSize get _slipPaper => PrinterConfig.bill.slipPaper;
 
-  /// Sends a finished PDF to the configured printer.
-  static Future<void> output(Uint8List pdf, {required String name, required PaperSize paper}) async {
-    switch (PrinterConfig.type) {
+  /// Sends a finished PDF to [target] (default: the bill printer).
+  static Future<void> output(Uint8List pdf, {required String name, required PaperSize paper, PrinterTarget? target}) async {
+    target ??= PrinterConfig.bill;
+    switch (target.type) {
       case PrinterType.device:
         await DevicePrinter.printInDevice(pdf);
       case PrinterType.bluetooth:
-        final address = PrinterConfig.btAddress;
+        final address = target.btAddress;
         if (address == null) throw 'Select a Bluetooth printer in Printer Settings';
         await DevicePrinter.printBluetooth(address, pdf, paper.dots);
       case PrinterType.system:
@@ -35,22 +36,24 @@ class PrintService {
 
   static String _rs(num v) => 'Rs. ${v.toStringAsFixed(2)}';
 
-  static pw.Widget _row(String l, String r, {bool bold = false, double size = 8}) => pw.Row(
-        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-        children: [
-          pw.Text(l, style: pw.TextStyle(fontSize: size, fontWeight: bold ? pw.FontWeight.bold : null)),
-          pw.Text(r, style: pw.TextStyle(fontSize: size, fontWeight: bold ? pw.FontWeight.bold : null)),
-        ],
-      );
+  /// Label on the left, value right-aligned; a long value wraps instead of running off the paper.
+  static pw.Widget _row(String l, String r, {bool bold = false, double size = 8}) {
+    final style = pw.TextStyle(fontSize: size, fontWeight: bold ? pw.FontWeight.bold : null);
+    return pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+      pw.Text(l, style: style),
+      pw.SizedBox(width: 6),
+      pw.Expanded(child: pw.Text(r, textAlign: pw.TextAlign.right, style: style)),
+    ]);
+  }
 
-  static pw.Widget _dash() => pw.Padding(
-        padding: const pw.EdgeInsets.symmetric(vertical: 3),
-        child: pw.Text('-' * 48, maxLines: 1, overflow: pw.TextOverflow.clip, style: const pw.TextStyle(fontSize: 7)),
-      );
+  static String _method(String m) => m == 'ONEPE' ? 'OnePe' : m;
+
+  /// Dashed separator across the full paper width (any roll size).
+  static pw.Widget _dash() => pw.Divider(height: 8, thickness: 0.8, color: PdfColors.black, borderStyle: pw.BorderStyle.dashed);
 
   static Future<pw.Document> receipt(Bill b, Shop shop, {Branch? branch, PaperSize? paper}) async {
     final s = shop.settings;
-    paper ??= PrinterConfig.paper;
+    paper ??= PrinterConfig.bill.paper;
     if (paper.isSheet) return _a4Invoice(b, shop, branch: branch, format: paper.format);
     final logo = s.showLogoAndShop ? await _logo(shop) : null;
     final doc = pw.Document();
@@ -104,7 +107,7 @@ class PrintService {
           if (b.loyaltyRedeemed > 0) _row('Points Redeemed:', '-${_rs(b.loyaltyRedeemed)}'),
           if (b.roundOff != 0) _row('Round Off:', '${b.roundOff > 0 ? '+' : '-'}${_rs(b.roundOff.abs())}'),
           _row('GRAND TOTAL:', _rs(b.total), bold: true, size: 10),
-          _row('Payment:', b.paymentMethod),
+          _row('Payment:', _method(b.paymentMethod)),
           if (b.received > 0) _row('Received:', _rs(b.received)),
           if (b.change > 0) _row('Change:', _rs(b.change)),
           if (s.showCustomerAccount && b.customerOpening != null) ...[
@@ -140,24 +143,29 @@ class PrintService {
     final logo = await _logo(shop);
     final doc = pw.Document();
     final upi = branch?.upiId ?? shop.upiId;
+    final a5 = format == PdfPageFormat.a5;
     doc.addPage(pw.MultiPage(
       pageFormat: format,
-      margin: pw.EdgeInsets.all(format == PdfPageFormat.a5 ? 20 : 32),
+      margin: pw.EdgeInsets.all(a5 ? 20 : 32),
+      theme: pw.ThemeData.withFont().copyWith(defaultTextStyle: pw.TextStyle(fontSize: a5 ? 9 : 11)),
       build: (_) => [
-        pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-          pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-            if (logo != null) pw.Image(logo, height: 48),
-            pw.Text(shop.name, style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
-            if (shop.address != null) pw.Text(shop.address!),
-            if (shop.contactNumber != null) pw.Text('Phone: ${shop.contactNumber}'),
-            if (shop.gstNumber != null) pw.Text('GSTIN: ${shop.gstNumber}'),
-          ]),
+        pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+          pw.Expanded(
+            child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+              if (logo != null) pw.Image(logo, height: 48),
+              pw.Text(shop.name, style: pw.TextStyle(fontSize: a5 ? 16 : 20, fontWeight: pw.FontWeight.bold)),
+              if (shop.address != null) pw.Text(shop.address!),
+              if (shop.contactNumber != null) pw.Text('Phone: ${shop.contactNumber}'),
+              if (shop.gstNumber != null) pw.Text('GSTIN: ${shop.gstNumber}'),
+            ]),
+          ),
+          pw.SizedBox(width: 12),
           pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
-            pw.Text('TAX INVOICE', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+            pw.Text('TAX INVOICE', style: pw.TextStyle(fontSize: a5 ? 13 : 16, fontWeight: pw.FontWeight.bold)),
             pw.Text('Invoice No: ${b.billNo}'),
             pw.Text('Date: ${dateTime(b.billDate)}'),
             if (branch != null) pw.Text('Branch: ${branch.name}'),
-            pw.Text('Payment Mode: ${b.paymentMethod}'),
+            pw.Text('Payment Mode: ${_method(b.paymentMethod)}'),
           ]),
         ]),
         pw.SizedBox(height: 16),
@@ -193,8 +201,9 @@ class PrintService {
               ],
             ]),
           ),
+          pw.SizedBox(width: 16),
           pw.SizedBox(
-            width: 220,
+            width: a5 ? 170 : 220,
             child: pw.Column(children: [
               _row('Subtotal', _rs(b.subtotal), size: 10),
               _row('GST', _rs(b.totalGst), size: 10),
@@ -220,15 +229,21 @@ class PrintService {
   static Future<Uint8List> billPdf(Bill b, Shop shop, {Branch? branch}) async => (await receipt(b, shop, branch: branch)).save();
 
   static Future<void> printBill(Bill b, Shop shop, {Branch? branch, Uint8List? pdf}) async {
-    await output(pdf ?? await billPdf(b, shop, branch: branch), name: 'Bill_${b.billNo}', paper: PrinterConfig.paper);
+    await output(pdf ?? await billPdf(b, shop, branch: branch), name: 'Bill_${b.billNo}', paper: PrinterConfig.bill.paper);
   }
 
-  static Future<void> printKot(Map<String, dynamic> kot, Shop shop) async {
+  /// Kitchen order ticket on the KOT printer (the bill printer unless a kitchen printer is set).
+  static Future<void> printKot(Map<String, dynamic> kot) async {
+    final target = PrinterConfig.kot;
+    await output(await kotPdf(kot, paper: target.slipPaper), name: 'KOT_${kot['billNo']}', paper: target.slipPaper, target: target);
+  }
+
+  static Future<Uint8List> kotPdf(Map<String, dynamic> kot, {PaperSize? paper}) {
     final doc = pw.Document();
     doc.addPage(pw.Page(
-      pageFormat: _slipPaper.format.copyWith(marginLeft: 6, marginRight: 6),
+      pageFormat: (paper ?? PrinterConfig.kot.slipPaper).format.copyWith(marginLeft: 6, marginRight: 6),
       build: (_) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
-        pw.Text('KITCHEN ORDER TICKET (KOT)', textAlign: pw.TextAlign.center, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
+        pw.Text('KITCHEN ORDER TICKET', textAlign: pw.TextAlign.center, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
         _dash(),
         _row('Token / Bill No:', '${kot['billNo']}', bold: true, size: 9),
         if (kot['tableName'] != null) _row('Table:', '${kot['tableName']}', bold: true, size: 9),
@@ -241,14 +256,18 @@ class PrintService {
         _dash(),
       ]),
     ));
-    await output(await doc.save(), name: 'KOT_${kot['billNo']}', paper: _slipPaper);
+    return doc.save();
   }
 
   static Future<void> printPaymentReceipt(Map<String, dynamic> payment, Customer c, double opening, Shop shop) async {
+    await output(await paymentReceiptPdf(payment, c, opening, shop), name: 'Payment_${payment['receiptNo']}', paper: _slipPaper);
+  }
+
+  static Future<Uint8List> paymentReceiptPdf(Map<String, dynamic> payment, Customer c, double opening, Shop shop, {PaperSize? paper}) {
     final doc = pw.Document();
     final amount = toDouble(payment['amount']);
     doc.addPage(pw.Page(
-      pageFormat: _slipPaper.format.copyWith(marginLeft: 6, marginRight: 6),
+      pageFormat: (paper ?? _slipPaper).format.copyWith(marginLeft: 6, marginRight: 6),
       build: (_) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
         pw.Text(shop.name, textAlign: pw.TextAlign.center, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11)),
         pw.Text('PAYMENT RECEIPT', textAlign: pw.TextAlign.center, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9)),
@@ -265,7 +284,7 @@ class PrintService {
         pw.Text('Thank you for your payment!', textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 8)),
       ]),
     ));
-    await output(await doc.save(), name: 'Payment_${payment['receiptNo']}', paper: _slipPaper);
+    return doc.save();
   }
 
   /// Share a bill summary via WhatsApp (wa.me deep link).

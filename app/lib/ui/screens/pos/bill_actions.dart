@@ -22,11 +22,7 @@ enum BillAction {
 /// The Proceed pop-up: Print Bill / Collect Payment / Print + Collect. Collecting is offered only for
 /// paid sales (not credit bills or expense vouchers). Returns null when cancelled (nothing is saved).
 Future<BillAction?> askBillAction(BuildContext context, {required double total, required bool allowCollect, String? customer}) {
-  final printer = switch (PrinterConfig.type) {
-    PrinterType.device => 'In-device printer',
-    PrinterType.bluetooth => PrinterConfig.btName ?? 'Bluetooth printer',
-    PrinterType.system => 'Print dialog',
-  };
+  final printer = PrinterConfig.bill.displayName;
   Widget option(BuildContext c, BillAction a, IconData icon, String title, String subtitle, {bool primary = false}) => Padding(
     padding: const EdgeInsets.only(bottom: 10),
     child: Material(
@@ -140,7 +136,7 @@ Future<List<String>> runBillAction(BillAction action, Uint8List pdf, {required S
   }
 
   await Future.wait([
-    if (action.prints) attempt(() => PrintService.output(pdf, name: 'Bill_$billNo', paper: PrinterConfig.paper)),
+    if (action.prints) attempt(() => PrintService.output(pdf, name: 'Bill_$billNo', paper: PrinterConfig.bill.paper)),
     if (action.collects) attempt(() => OnePePay.collect(pdf, billNo: billNo)),
   ]);
   return errors;

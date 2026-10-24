@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
 import '../../services/device_printer.dart';
+import '../../services/print_service.dart';
 import '../../services/printer_config.dart';
 import '../widgets/common.dart';
 
-/// Printer choice for this device (saved immediately, per terminal): in-device (Nexgo), Bluetooth or
-/// the system print dialog, and the paper sizes each one supports.
+/// Printers of this device (saved immediately, per terminal): the bill printer and the KOT / kitchen
+/// printer, each Nexgo N82, Bluetooth or the system print dialog with the paper sizes it supports.
 class PrinterSettingsCard extends StatefulWidget {
   final VoidCallback onTestPrint;
   const PrinterSettingsCard({super.key, required this.onTestPrint});
@@ -16,9 +17,81 @@ class PrinterSettingsCard extends StatefulWidget {
 }
 
 class _PrinterSettingsCardState extends State<PrinterSettingsCard> {
+  static const _testKot = {
+    'billNo': 'TEST-001',
+    'tableName': 'T1',
+    'items': [
+      {'productName': 'Test Item 1', 'quantity': 1, 'note': 'Less spicy'},
+      {'productName': 'Test Item 2', 'quantity': 2},
+    ],
+  };
+
+  Widget _heading(String text) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+    child: Text(text, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _heading('Bill Printer'),
+        _PrinterPicker(target: PrinterConfig.bill, testLabel: 'Send Test Bill Print', onTest: widget.onTestPrint, onChanged: () => setState(() {})),
+        const Padding(padding: EdgeInsets.fromLTRB(16, 16, 16, 0), child: Divider()),
+        _heading('KOT / Kitchen Printer'),
+        SwitchListTile(
+          title: const Text('Same as bill printer'),
+          subtitle: Text(
+            PrinterConfig.kotSameAsBill
+                ? 'Kitchen order tickets print on ${PrinterConfig.bill.displayName}'
+                : 'Kitchen order tickets print on a separate printer',
+          ),
+          value: PrinterConfig.kotSameAsBill,
+          onChanged: (v) async {
+            await PrinterConfig.setKotSameAsBill(v);
+            if (mounted) setState(() {});
+          },
+        ),
+        if (!PrinterConfig.kotSameAsBill)
+          _PrinterPicker(
+            target: PrinterConfig.kitchen,
+            testLabel: 'Send Test KOT Print',
+            onTest: () => guard(context, () => PrintService.printKot(_testKot)),
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: OutlinedButton.icon(
+              onPressed: () => guard(context, () => PrintService.printKot(_testKot)),
+              icon: const Icon(Icons.soup_kitchen_outlined),
+              label: const Text('Send Test KOT Print'),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Printer type tiles + paper sizes + test button for one [PrinterTarget].
+class _PrinterPicker extends StatefulWidget {
+  final PrinterTarget target;
+  final String testLabel;
+  final VoidCallback onTest;
+  final VoidCallback? onChanged;
+  const _PrinterPicker({required this.target, required this.testLabel, required this.onTest, this.onChanged});
+
+  @override
+  State<_PrinterPicker> createState() => _PrinterPickerState();
+}
+
+class _PrinterPickerState extends State<_PrinterPicker> {
+  PrinterTarget get t => widget.target;
+
   Future<void> _set({PrinterType? type, PaperSize? paper, String? btName, String? btAddress}) async {
-    await PrinterConfig.save(type: type, paper: paper, btName: btName, btAddress: btAddress);
+    await t.save(type: type, paper: paper, btName: btName, btAddress: btAddress);
     if (mounted) setState(() {});
+    widget.onChanged?.call();
   }
 
   Future<void> _pickBluetooth() async {
@@ -42,7 +115,7 @@ class _PrinterSettingsCardState extends State<PrinterSettingsCard> {
                 leading: const Icon(Icons.print_rounded, color: AppColors.blue),
                 title: Text(d['name'] ?? d['address']!, style: const TextStyle(fontWeight: FontWeight.w700)),
                 subtitle: Text(d['address']!),
-                trailing: d['address'] == PrinterConfig.btAddress ? const Icon(Icons.check_circle, color: AppColors.green) : null,
+                trailing: d['address'] == t.btAddress ? const Icon(Icons.check_circle, color: AppColors.green) : null,
                 onTap: () => Navigator.pop(c, d),
               ),
             const SizedBox(height: 8),
@@ -53,10 +126,10 @@ class _PrinterSettingsCardState extends State<PrinterSettingsCard> {
     if (picked != null) await _set(type: PrinterType.bluetooth, btName: picked['name'], btAddress: picked['address']);
   }
 
-  Widget _typeTile(PrinterType t) {
-    final available = PrinterConfig.availableTypes.contains(t);
-    final selected = PrinterConfig.type == t;
-    final icon = switch (t) {
+  Widget _typeTile(PrinterType type) {
+    final available = PrinterConfig.availableTypes.contains(type);
+    final selected = t.type == type;
+    final icon = switch (type) {
       PrinterType.device => Icons.point_of_sale_rounded,
       PrinterType.bluetooth => Icons.bluetooth_rounded,
       PrinterType.system => Icons.print_rounded,
@@ -71,7 +144,7 @@ class _PrinterSettingsCardState extends State<PrinterSettingsCard> {
         ),
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: available ? () => t == PrinterType.bluetooth && PrinterConfig.btAddress == null ? _pickBluetooth() : _set(type: t) : null,
+          onTap: available ? () => type == PrinterType.bluetooth && t.btAddress == null ? _pickBluetooth() : _set(type: type) : null,
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Row(
@@ -88,22 +161,22 @@ class _PrinterSettingsCardState extends State<PrinterSettingsCard> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        t.label,
+                        type.label,
                         style: TextStyle(fontWeight: FontWeight.w800, color: available ? AppColors.navy : AppColors.muted),
                       ),
                       Text(
                         !available
-                            ? 'Available in the Android app'
-                            : t == PrinterType.bluetooth && PrinterConfig.btAddress != null
-                            ? PrinterConfig.btName ?? PrinterConfig.btAddress!
-                            : t.hint,
+                            ? PrinterConfig.unavailableReason(type)!
+                            : type == PrinterType.bluetooth && t.btAddress != null
+                            ? t.btName ?? t.btAddress!
+                            : type.hint,
                         style: const TextStyle(fontSize: 12, color: AppColors.muted),
                       ),
                     ],
                   ),
                 ),
-                if (t == PrinterType.bluetooth && available)
-                  TextButton(onPressed: _pickBluetooth, child: Text(PrinterConfig.btAddress == null ? 'Select' : 'Change')),
+                if (type == PrinterType.bluetooth && available)
+                  TextButton(onPressed: _pickBluetooth, child: Text(t.btAddress == null ? 'Select' : 'Change')),
                 Icon(selected ? Icons.radio_button_checked : Icons.radio_button_off, color: selected ? AppColors.blue : AppColors.border),
               ],
             ),
@@ -115,15 +188,10 @@ class _PrinterSettingsCardState extends State<PrinterSettingsCard> {
 
   @override
   Widget build(BuildContext context) {
-    final papers = PrinterConfig.papersFor(PrinterConfig.type);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
-          child: Text('Bill Printer (this device)', style: TextStyle(fontWeight: FontWeight.w700)),
-        ),
-        for (final t in PrinterType.values) _typeTile(t),
+        for (final type in PrinterType.values) _typeTile(type),
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 12, 16, 6),
           child: Text('Paper Size', style: TextStyle(fontWeight: FontWeight.w700)),
@@ -134,29 +202,28 @@ class _PrinterSettingsCardState extends State<PrinterSettingsCard> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final p in PaperSize.values)
-                if (papers.contains(p))
-                  ChoiceChip(
-                    label: Text(p.label),
-                    tooltip: p.hint,
-                    selected: PrinterConfig.paper == p,
-                    showCheckmark: false,
-                    labelStyle: TextStyle(fontWeight: FontWeight.w800, color: PrinterConfig.paper == p ? Colors.white : AppColors.navy),
-                    onSelected: (_) => _set(paper: p),
-                  ),
+              for (final p in t.papers)
+                ChoiceChip(
+                  label: Text(p.label),
+                  tooltip: p.hint,
+                  selected: t.paper == p,
+                  showCheckmark: false,
+                  labelStyle: TextStyle(fontWeight: FontWeight.w800, color: t.paper == p ? Colors.white : AppColors.navy),
+                  onSelected: (_) => _set(paper: p),
+                ),
             ],
           ),
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
           child: Text(
-            PrinterConfig.type == PrinterType.device ? 'The in-device printer supports 2" (58mm) rolls only.' : PrinterConfig.paper.hint,
+            t.type == PrinterType.device ? 'The Nexgo N82 printer supports 2" (58mm) rolls only.' : t.paper.hint,
             style: const TextStyle(fontSize: 12, color: AppColors.muted),
           ),
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          child: OutlinedButton.icon(onPressed: widget.onTestPrint, icon: const Icon(Icons.print), label: const Text('Send Test Bill Print')),
+          child: OutlinedButton.icon(onPressed: widget.onTest, icon: const Icon(Icons.print), label: Text(widget.testLabel)),
         ),
       ],
     );

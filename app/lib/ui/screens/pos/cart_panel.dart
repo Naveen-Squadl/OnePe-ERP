@@ -419,7 +419,7 @@ class _SummaryState extends State<_Summary> {
     final kot = await guard(context, cart.sendKot);
     if (kot == null || !context.mounted) return;
     showSnack(context, '✅ KOT sent for #${kot['billNo']}');
-    await PrintService.printKot(kot, session.shop!);
+    await PrintService.printKot(kot);
   }
 
   Future<void> _saveWaiting(BuildContext context) async {

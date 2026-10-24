@@ -1,5 +1,5 @@
 name: onepe_pos
-description: "OnePe POS – billing, inventory and reports."
+description: "OnePe ERP – billing, inventory and reports."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -60,6 +60,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -124,3 +125,14 @@ flutter:
 # pdf 3.12 caps archive <4.1, but image >=4.10 needs archive's newer decodeLazy API.
 dependency_overrides:
   image: 4.9.2
+
+# App icon: lime OnePe mark on OnePe Blue (`dart run flutter_launcher_icons` regenerates).
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/launcher/icon_full.png"
+  adaptive_icon_background: "#084E8F"
+  adaptive_icon_foreground: "assets/launcher/icon_foreground.png"
+  remove_alpha_ios: true
+  background_color_ios: "#084E8F"
+  min_sdk_android: 21

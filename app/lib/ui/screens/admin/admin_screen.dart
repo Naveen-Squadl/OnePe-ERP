@@ -199,7 +199,7 @@ class _AdminScreenState extends State<AdminScreen> {
                           onPressed: () {
                             final digits = (e['contactNo'] as String).replaceAll(RegExp(r'[^0-9]'), '');
                             final to = digits.length == 10 ? '91$digits' : digits;
-                            launchUrl(Uri.parse('https://wa.me/$to?text=${Uri.encodeComponent('Hello ${e['name']}, regarding your OnePe POS inquiry...')}'),
+                            launchUrl(Uri.parse('https://wa.me/$to?text=${Uri.encodeComponent('Hello ${e['name']}, regarding your OnePe ERP inquiry...')}'),
                                 mode: LaunchMode.externalApplication);
                           },
                           icon: const Icon(Icons.chat),

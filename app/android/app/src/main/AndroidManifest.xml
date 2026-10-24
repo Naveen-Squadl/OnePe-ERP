@@ -9,7 +9,7 @@
     <application
         tools:replace="android:label"
         android:usesCleartextTraffic="true"
-        android:label="OnePe POS"
+        android:label="OnePe ERP"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
