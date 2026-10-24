@@ -12,6 +12,7 @@ import '../widgets/app_shell.dart';
 import '../widgets/brand.dart';
 import '../widgets/common.dart';
 import '../widgets/form_dialog.dart';
+import 'printer_settings.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -82,6 +83,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final list = List<String>.from(_s[key] ?? const []);
     final r = await showFormDialog(context, title: title, fields: [FieldSpec('v', hint, initial: list.join(', '))]);
     if (r != null) setState(() => _s[key] = r['v']!.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList());
+  }
+
+  Future<void> _testPrint() async {
+    final s = context.read<Session>();
+    final test = Bill({
+      'id': 'test', 'billNo': 'TEST-001', 'status': 'COMPLETED', 'billDate': DateTime.now().toIso8601String(),
+      'items': [
+        {'productName': 'Test Item 1', 'quantity': 1, 'soldPrice': 50, 'lineTotal': 50},
+        {'productName': 'Test Item 2', 'quantity': 2, 'soldPrice': 25, 'lineTotal': 50},
+      ],
+      'subtotal': 100, 'totalAmount': 100, 'receivedAmount': 100, 'paymentMethod': 'CASH', 'userName': s.user?.name,
+    });
+    await guard(context, () => PrintService.printBill(test, Shop.fromJson({...s.shop!.toJsonForPreview(), 'settings': _s}), branch: s.activeBranch));
   }
 
   @override
@@ -166,48 +180,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ]),
             _section('Printer Settings', [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                child: DropdownButtonFormField<String>(
-                  initialValue: _s['paperSize'] ?? '58mm',
-                  decoration: const InputDecoration(labelText: 'Paper Width / Size'),
-                  items: const [
-                    DropdownMenuItem(value: '58mm', child: Text('58mm thermal')),
-                    DropdownMenuItem(value: '80mm', child: Text('80mm thermal')),
-                    DropdownMenuItem(value: 'A4', child: Text('A4 Tax Invoice')),
-                  ],
-                  onChanged: (v) => setState(() => _s['paperSize'] = v),
-                ),
-              ),
-              const ListTile(
-                dense: true,
-                leading: Icon(Icons.info_outline),
-                title: Text('Customer Bill Printer: System Default (PDF)'),
-                subtitle: Text('Prints via the device print dialog. Direct Bluetooth ESC/POS printing is planned for the next phase.'),
-              ),
+              PrinterSettingsCard(onTestPrint: _testPrint),
               const Padding(padding: EdgeInsets.fromLTRB(16, 8, 16, 0), child: Text('Print Sections', style: TextStyle(fontWeight: FontWeight.w700))),
               _switch('showLogoAndShop', '1. Logo & Shop Details', subtitle: 'Shop name, address, contact, logo', def: true),
               _switch('showBillDetails', '2. Bill & Items Table', subtitle: 'Bill number, date, cashier, itemized prices', def: true),
               _switch('showCustomerAccount', '3. Customer Account & Balances', subtitle: 'Customer name, phone, opening/closing balance', def: true),
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: OutlinedButton.icon(
-                  onPressed: () {
-                    final s = context.read<Session>();
-                    final test = Bill({
-                      'id': 'test', 'billNo': 'TEST-001', 'status': 'COMPLETED', 'billDate': DateTime.now().toIso8601String(),
-                      'items': [
-                        {'productName': 'Test Item 1', 'quantity': 1, 'soldPrice': 50, 'lineTotal': 50},
-                        {'productName': 'Test Item 2', 'quantity': 2, 'soldPrice': 25, 'lineTotal': 50},
-                      ],
-                      'subtotal': 100, 'totalAmount': 100, 'receivedAmount': 100, 'paymentMethod': 'CASH', 'userName': s.user?.name,
-                    });
-                    PrintService.printBill(test, Shop.fromJson({...s.shop!.toJsonForPreview(), 'settings': _s}), branch: s.activeBranch);
-                  },
-                  icon: const Icon(Icons.print),
-                  label: const Text('Send Test Bill Print'),
-                ),
-              ),
             ]),
             Padding(
               padding: const EdgeInsets.only(bottom: 12),

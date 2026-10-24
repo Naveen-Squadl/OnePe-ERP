@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'core/config.dart';
 import 'core/theme.dart';
+import 'services/printer_config.dart';
 import 'state/cart.dart';
 import 'state/catalog.dart';
 import 'state/session.dart';
@@ -10,6 +11,7 @@ import 'ui/router.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  PrinterConfig.load();
   final session = Session()..restore();
   runApp(MultiProvider(
     providers: [

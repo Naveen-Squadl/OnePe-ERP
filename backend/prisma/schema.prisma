@@ -55,6 +55,7 @@ enum PaymentMethod {
   SPLIT
   BANK
   CHEQUE
+  ONEPE
 }
 
 enum PurchaseStatus {

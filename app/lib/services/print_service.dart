@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -7,15 +9,29 @@ import 'package:url_launcher/url_launcher.dart';
 import '../core/api.dart';
 import '../core/format.dart';
 import '../models/models.dart';
+import 'device_printer.dart';
+import 'printer_config.dart';
 
-/// Receipt / KOT / payment-receipt rendering. Uses the OS print dialog (System Default)
-/// which works on web, Android and iOS; direct Bluetooth ESC/POS is a later phase.
+/// Receipt / KOT / payment-receipt rendering. Every slip is built as a PDF and sent to the printer
+/// chosen in Printer Settings ([PrinterConfig]): the terminal's in-device printer (Nexgo), a paired
+/// Bluetooth printer, or the OS / browser print dialog.
 class PrintService {
-  static PdfPageFormat _format(String paper) => switch (paper) {
-        'A4' => PdfPageFormat.a4,
-        '80mm' => PdfPageFormat.roll80,
-        _ => PdfPageFormat.roll57,
-      };
+  /// Paper for slips that have no sheet layout (KOT, payment receipt).
+  static PaperSize get _slipPaper => PrinterConfig.paper.isSheet ? PaperSize.in3 : PrinterConfig.paper;
+
+  /// Sends a finished PDF to the configured printer.
+  static Future<void> output(Uint8List pdf, {required String name, required PaperSize paper}) async {
+    switch (PrinterConfig.type) {
+      case PrinterType.device:
+        await DevicePrinter.printInDevice(pdf);
+      case PrinterType.bluetooth:
+        final address = PrinterConfig.btAddress;
+        if (address == null) throw 'Select a Bluetooth printer in Printer Settings';
+        await DevicePrinter.printBluetooth(address, pdf, paper.dots);
+      case PrinterType.system:
+        await Printing.layoutPdf(name: name, format: paper.format, onLayout: (_) async => pdf);
+    }
+  }
 
   static String _rs(num v) => 'Rs. ${v.toStringAsFixed(2)}';
 
@@ -32,13 +48,14 @@ class PrintService {
         child: pw.Text('-' * 48, maxLines: 1, overflow: pw.TextOverflow.clip, style: const pw.TextStyle(fontSize: 7)),
       );
 
-  static Future<pw.Document> receipt(Bill b, Shop shop, {Branch? branch}) async {
+  static Future<pw.Document> receipt(Bill b, Shop shop, {Branch? branch, PaperSize? paper}) async {
     final s = shop.settings;
-    if (s.paperSize == 'A4') return _a4Invoice(b, shop, branch: branch);
+    paper ??= PrinterConfig.paper;
+    if (paper.isSheet) return _a4Invoice(b, shop, branch: branch, format: paper.format);
     final logo = s.showLogoAndShop ? await _logo(shop) : null;
     final doc = pw.Document();
     doc.addPage(pw.Page(
-      pageFormat: _format(s.paperSize).copyWith(marginLeft: 6, marginRight: 6, marginTop: 8, marginBottom: 8),
+      pageFormat: paper.format.copyWith(marginLeft: 6, marginRight: 6, marginTop: 8, marginBottom: 8),
       build: (_) => pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.stretch,
         children: [
@@ -119,13 +136,13 @@ class PrintService {
     }
   }
 
-  static Future<pw.Document> _a4Invoice(Bill b, Shop shop, {Branch? branch}) async {
+  static Future<pw.Document> _a4Invoice(Bill b, Shop shop, {Branch? branch, PdfPageFormat format = PdfPageFormat.a4}) async {
     final logo = await _logo(shop);
     final doc = pw.Document();
     final upi = branch?.upiId ?? shop.upiId;
     doc.addPage(pw.MultiPage(
-      pageFormat: PdfPageFormat.a4,
-      margin: const pw.EdgeInsets.all(32),
+      pageFormat: format,
+      margin: pw.EdgeInsets.all(format == PdfPageFormat.a5 ? 20 : 32),
       build: (_) => [
         pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
           pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
@@ -199,15 +216,17 @@ class PrintService {
     return doc;
   }
 
-  static Future<void> printBill(Bill b, Shop shop, {Branch? branch}) async {
-    final doc = await receipt(b, shop, branch: branch);
-    await Printing.layoutPdf(name: 'Bill_${b.billNo}', format: _format(shop.settings.paperSize), onLayout: (_) => doc.save());
+  /// The customer bill as PDF bytes, laid out for the configured paper.
+  static Future<Uint8List> billPdf(Bill b, Shop shop, {Branch? branch}) async => (await receipt(b, shop, branch: branch)).save();
+
+  static Future<void> printBill(Bill b, Shop shop, {Branch? branch, Uint8List? pdf}) async {
+    await output(pdf ?? await billPdf(b, shop, branch: branch), name: 'Bill_${b.billNo}', paper: PrinterConfig.paper);
   }
 
   static Future<void> printKot(Map<String, dynamic> kot, Shop shop) async {
     final doc = pw.Document();
     doc.addPage(pw.Page(
-      pageFormat: PdfPageFormat.roll57.copyWith(marginLeft: 6, marginRight: 6),
+      pageFormat: _slipPaper.format.copyWith(marginLeft: 6, marginRight: 6),
       build: (_) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
         pw.Text('KITCHEN ORDER TICKET (KOT)', textAlign: pw.TextAlign.center, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10)),
         _dash(),
@@ -222,14 +241,14 @@ class PrintService {
         _dash(),
       ]),
     ));
-    await Printing.layoutPdf(name: 'KOT_${kot['billNo']}', format: PdfPageFormat.roll57, onLayout: (_) => doc.save());
+    await output(await doc.save(), name: 'KOT_${kot['billNo']}', paper: _slipPaper);
   }
 
   static Future<void> printPaymentReceipt(Map<String, dynamic> payment, Customer c, double opening, Shop shop) async {
     final doc = pw.Document();
     final amount = toDouble(payment['amount']);
     doc.addPage(pw.Page(
-      pageFormat: _format(shop.settings.paperSize == 'A4' ? '80mm' : shop.settings.paperSize).copyWith(marginLeft: 6, marginRight: 6),
+      pageFormat: _slipPaper.format.copyWith(marginLeft: 6, marginRight: 6),
       build: (_) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
         pw.Text(shop.name, textAlign: pw.TextAlign.center, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11)),
         pw.Text('PAYMENT RECEIPT', textAlign: pw.TextAlign.center, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9)),
@@ -246,7 +265,7 @@ class PrintService {
         pw.Text('Thank you for your payment!', textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 8)),
       ]),
     ));
-    await Printing.layoutPdf(name: 'Payment_${payment['receiptNo']}', onLayout: (_) => doc.save());
+    await output(await doc.save(), name: 'Payment_${payment['receiptNo']}', paper: _slipPaper);
   }
 
   /// Share a bill summary via WhatsApp (wa.me deep link).

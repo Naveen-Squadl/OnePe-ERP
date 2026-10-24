@@ -11,6 +11,7 @@ import '../../../state/session.dart';
 import '../../widgets/brand.dart';
 import '../../widgets/common.dart';
 import '../../widgets/pickers.dart';
+import 'bill_actions.dart';
 
 class CartPanel extends StatelessWidget {
   final VoidCallback? onCheckedOut;
@@ -429,10 +430,15 @@ class _SummaryState extends State<_Summary> {
     }
   }
 
+  /// Proceed: ask Print / Collect / Print + Collect, save the bill (OnePe when collecting, otherwise
+  /// cash or credit), build its PDF and hand it to the printer and/or the OnePe payment app.
   Future<void> _pay(BuildContext context) async {
     if (cart.isEmpty) return showSnack(context, 'Your cart is empty', error: true);
     final credit = cart.onCredit && cart.hasCustomer && !cart.isExpense;
-    final bill = await guard(context, () => cart.checkout(paymentMethod: credit ? 'CREDIT' : 'CASH', received: credit ? 0 : cart.payable));
+    final action = await askBillAction(context, total: cart.payable, allowCollect: !credit && !cart.isExpense, customer: cart.customer?.name);
+    if (action == null || !context.mounted) return;
+    final method = credit ? 'CREDIT' : (action.collects ? 'ONEPE' : 'CASH');
+    final bill = await guard(context, () => cart.checkout(paymentMethod: method, received: credit ? 0 : cart.payable));
     if (bill == null || !context.mounted) return;
     context.read<Catalog>().load(); // refresh stock
     final panel = context.findAncestorWidgetOfExactType<CartPanel>();
@@ -440,7 +446,7 @@ class _SummaryState extends State<_Summary> {
     // The navigator's own context outlives this panel when the mobile cart page is popped.
     final hostContext = Navigator.of(context).context;
     if (panel?.popOnDone == true) Navigator.of(context).pop();
-    if (hostContext.mounted) await showBillDoneDialog(hostContext, bill, session);
+    if (hostContext.mounted) await finishBill(hostContext, bill, session, action);
   }
 
   /// Outlined action on the blue payment card (lime when toggled on).
@@ -581,10 +587,10 @@ class _SummaryState extends State<_Summary> {
               label: cart.isExpense
                   ? 'Record Expense Voucher'
                   : cart.isEmpty
-                      ? 'Charge'
+                      ? 'Proceed'
                       : cart.onCredit
-                          ? 'Save on Credit · $payable'
-                          : 'Charge $payable',
+                          ? 'Proceed on Credit · $payable'
+                          : 'Proceed · $payable',
               icon: cart.isExpense ? Icons.receipt_long_rounded : Icons.arrow_forward_rounded,
               busy: cart.busy,
               onPressed: () => _pay(context),
@@ -596,31 +602,47 @@ class _SummaryState extends State<_Summary> {
   }
 }
 
-/// Post-checkout dialog: print / WhatsApp / new order.
-Future<void> showBillDoneDialog(BuildContext context, Bill bill, Session session) async {
+/// After checkout: build the bill PDF, then print and/or collect as chosen in the Proceed pop-up.
+Future<void> finishBill(BuildContext context, Bill bill, Session session, BillAction action) async {
   final shop = session.shop!;
   if (shop.settings.whatsappCustomerShare && bill.customerContact != null && !bill.isExpense) {
     PrintService.shareBillWhatsApp(bill, shop);
   }
-  await showDialog(
+  final saved = bill.isPendingSync ? 'Saved offline – will sync' : (bill.isExpense ? 'Expense recorded' : 'Bill #${bill.billNo} saved');
+  if (action == BillAction.saveOnly) return showSnack(context, '✅ $saved');
+  final nav = Navigator.of(context, rootNavigator: true);
+  showDialog(
     context: context,
-    builder: (c) => AlertDialog(
-      icon: Icon(bill.isPendingSync ? Icons.cloud_off : Icons.check_circle, color: bill.isPendingSync ? StatusColors.waiting : AppColors.green, size: 56),
-      title: Text(bill.isPendingSync ? 'Saved offline' : (bill.isExpense ? 'Expense Recorded' : 'Bill Saved (${bill.paymentMethod})')),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        Text('Bill #${bill.billNo}', style: const TextStyle(fontWeight: FontWeight.w600)),
-        const SizedBox(height: 4),
-        Text(money(bill.total), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 30, color: AppColors.blue)),
-        if (bill.change > 0) Text('Change Returned: ${money(bill.change)}', style: const TextStyle(color: AppColors.green, fontWeight: FontWeight.w700)),
-        if (bill.customerClosing != null) Text('New Account Balance: ${money(bill.customerClosing)}'),
-        if (bill.loyaltyEarned > 0) Text('Points Earned: ${bill.loyaltyEarned.toStringAsFixed(0)}'),
-        if (bill.isPendingSync) const Text('Device is offline. The bill is saved safely and will sync automatically.', textAlign: TextAlign.center),
-      ]),
-      actions: [
-        if (bill.customerContact != null) TextButton.icon(onPressed: () => PrintService.shareBillWhatsApp(bill, shop), icon: const Icon(Icons.chat), label: const Text('WhatsApp')),
-        TextButton.icon(onPressed: () => PrintService.printBill(bill, shop, branch: session.activeBranch), icon: const Icon(Icons.print), label: const Text('Print')),
-        FilledButton(onPressed: () => Navigator.pop(c), child: const Text('New Order')),
-      ],
+    barrierDismissible: false,
+    builder: (_) => PopScope(
+      canPop: false,
+      child: AlertDialog(
+        content: Row(children: [
+          const SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 3)),
+          const SizedBox(width: 18),
+          Expanded(
+            child: Text(
+              action == BillAction.printAndCollect ? 'Printing & opening OnePe…' : (action.prints ? 'Printing bill…' : 'Opening OnePe…'),
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ]),
+      ),
     ),
   );
+  var errors = <String>[];
+  try {
+    final pdf = await PrintService.billPdf(bill, shop, branch: session.activeBranch);
+    errors = await runBillAction(action, pdf, billNo: bill.billNo);
+  } catch (e) {
+    errors = ['$e'];
+  } finally {
+    nav.pop();
+  }
+  if (!context.mounted) return;
+  if (errors.isEmpty) {
+    showSnack(context, '✅ $saved${action.collects ? ' · sent to OnePe' : ''}');
+  } else {
+    showSnack(context, '$saved, but: ${errors.join('; ')}', error: true);
+  }
 }

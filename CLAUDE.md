@@ -79,5 +79,10 @@ The phone talks to the **API**, never to Postgres directly.
   Tokens live in `app/lib/core/theme.dart` (`AppColors`); primary action = lime with navy text (`GreenButton`, name kept); blue rounded app bars; lime "step" strip
   under blue panels is the brand element. POS: phone = blue header + floating navy dock with lime cart button; wide (≥900) = navy side rail + cart panel.
   Check phone layouts at 360×640 (5.5").
+- Checkout: cart **Proceed** → pop-up Print Bill / Collect Payment / Print + Collect (`pos/bill_actions.dart`) → bill saved (`ONEPE` when collecting,
+  else CASH/CREDIT) → bill PDF → printer and/or OnePe payment app (multipart POST `pdf` + `images` to `http://127.0.0.1:8080/` on the terminal).
+- Printing: per-device `PrinterConfig` (SharedPreferences) – In-device Nexgo (2" only), Bluetooth ESC/POS raster (2"/3"/4"/A5/A4) or system dialog.
+  Native code: `android/app/src/main/java/com/onepe/onepe_pos/` (PrinterChannel, PdfRaster, NexgoPrinter, BluetoothEscPos) + `libs/ps-n86Release-v2.1.10.aar`
+  (Nexgo SDK, taken from `OnePe-Android-Printer-Plugin-main`). Channel `onepe/printer`.
 - Don't add attribution/branding of the original anywhere; don't commit `.env` or `uploads/`.
 - Not a git repo yet — ask before `git init`/committing.

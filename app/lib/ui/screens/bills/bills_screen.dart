@@ -240,7 +240,7 @@ class _BillCard extends StatelessWidget {
                   Row(children: [
                     meta(Icons.shopping_bag_outlined, '${b.items.length} Items'),
                     const SizedBox(width: 14),
-                    meta(Icons.payments_outlined, b.paymentMethod[0] + b.paymentMethod.substring(1).toLowerCase()),
+                    meta(Icons.payments_outlined, b.paymentMethod == 'ONEPE' ? 'OnePe' : b.paymentMethod[0] + b.paymentMethod.substring(1).toLowerCase()),
                   ]),
                   if (b.userName != null) meta(Icons.badge_outlined, 'Billed by: ${b.userName}', color: AppColors.blue),
                   if (b.isDeleted && b.deletedBy != null) meta(Icons.delete_outline, 'Deleted by: ${b.deletedBy}', color: AppColors.danger),
@@ -402,7 +402,7 @@ Future<void> showBillDetail(BuildContext context, Bill b, Future<void> Function(
                 const SizedBox(width: 10),
               ],
               Expanded(
-                child: FilledButton.icon(onPressed: () => PrintService.printBill(b, session.shop!, branch: session.activeBranch), icon: const Icon(Icons.print, size: 18), label: const Text('Print')),
+                child: FilledButton.icon(onPressed: () => guard(c, () => PrintService.printBill(b, session.shop!, branch: session.activeBranch)), icon: const Icon(Icons.print, size: 18), label: const Text('Print')),
               ),
             ]),
           ),
