@@ -63,7 +63,7 @@ test('pure totals: GST exclusive / inclusive, discounts, loyalty', () => {
   assert.equal(u.roundOff, 0.4);
 });
 
-test('full sale lifecycle: credit sale, payment, edit, cancel, restore, delete', async () => {
+test('full sale lifecycle: credit sale, payment, locked edit/delete, cancel, restore', async () => {
   const cat = (await api('/categories', admin, { body: { name: 'Cakes' } })).json;
   const prod = await api('/products', admin, {
     body: { name: 'Plum Cake', categoryId: cat.id, basePrice: 100, gstPercent: 5, barcode: `PC${tag}`, openingStock: 20, expiryDate: new Date(Date.now() + 86_400_000).toISOString() },
@@ -95,40 +95,45 @@ test('full sale lifecycle: credit sale, payment, edit, cancel, restore, delete',
   const pay = await api(`/customers/${customerId}/payments`, admin, { body: { amount: 115, method: 'UPI' } });
   assert.equal(pay.json.customer.currentBalance, 100);
 
-  // Edit bill: 3 → 1 unit (105), restocks 2 units and re-computes the balance.
+  // A completed bill is never edited or deleted.
   const edit = await api('/bills/checkout', admin, {
     body: { id: billId, editing: true, customerId, items: [{ productId: prod.json.id, quantity: 1 }], paymentMethod: 'CASH', receivedAmount: 100, giveChange: false },
   });
-  assert.equal(edit.json.totalAmount, 105);
-  assert.equal(edit.json.billNo, sale.json.billNo);
-  assert.equal((await api(`/products/${prod.json.id}`, admin)).json.stock, 19);
-  let cust = (await api(`/customers/${customerId}`, admin)).json;
-  assert.equal(cust.currentBalance, -110); // 0 + 105 − 100 − 115 payment
-  assert.equal(cust.loyaltyPoints, 1);
+  assert.equal(edit.status, 409);
+  assert.equal((await api(`/bills/${billId}`, admin, { method: 'DELETE' })).status, 409);
+  assert.equal((await api(`/bills/${billId}/permanent`, admin, { method: 'DELETE' })).status, 409);
+  assert.equal((await api(`/products/${prod.json.id}`, admin)).json.stock, 17);
 
   // Ledger agrees with the live balance.
+  let cust = (await api(`/customers/${customerId}`, admin)).json;
+  assert.equal(cust.currentBalance, 100);
   const ledger = (await api(`/customers/${customerId}/ledger`, admin)).json;
   assert.equal(ledger.closing, cust.currentBalance);
 
-  // Cancel reverts stock + balance; restore re-applies.
-  await api(`/bills/${billId}/cancel`, admin, { body: {} });
+  // Cancel needs a reason; it reverts stock + balance. Restore (admin) re-applies.
+  assert.equal((await api(`/bills/${billId}/cancel`, admin, { body: {} })).status, 400);
+  const cancelled = await api(`/bills/${billId}/cancel`, admin, { body: { reason: 'Wrong item' } });
+  assert.equal(cancelled.json.cancelReason, 'Wrong item');
   assert.equal((await api(`/products/${prod.json.id}`, admin)).json.stock, 20);
   assert.equal((await api(`/customers/${customerId}`, admin)).json.currentBalance, -115);
   await api(`/bills/${billId}/restore`, admin, { body: {} });
-  assert.equal((await api(`/products/${prod.json.id}`, admin)).json.stock, 19);
-
-  // Soft delete then permanent delete; stock returns once.
-  await api(`/bills/${billId}`, admin, { method: 'DELETE' });
-  const deleted = (await api('/bills?deleted=true', admin)).json;
-  assert.ok(deleted.some((b: any) => b.id === billId));
-  await api(`/bills/${billId}/permanent`, admin, { method: 'DELETE' });
-  assert.equal((await api(`/products/${prod.json.id}`, admin)).json.stock, 20);
-
-  // Batches were restored too.
-  const batches = (await api('/stock/batches', admin)).json;
-  assert.equal(batches.reduce((s: number, b: any) => s + b.remainingQuantity, 0), 20);
+  assert.equal((await api(`/products/${prod.json.id}`, admin)).json.stock, 17);
   cust = (await api(`/customers/${customerId}`, admin)).json;
-  assert.equal(cust.currentBalance, -115);
+  assert.equal(cust.currentBalance, 100);
+
+  // Batches follow the same path.
+  const batches = (await api('/stock/batches', admin)).json;
+  assert.equal(batches.reduce((s: number, b: any) => s + b.remainingQuantity, 0), 17);
+
+  // Waiting orders (not billed yet) can be deleted, then removed for good.
+  const parked = randomUUID();
+  await api('/bills/checkout', admin, { body: { id: parked, status: 'WAITING', items: [{ productId: prod.json.id, quantity: 1 }] } });
+  assert.equal((await api(`/bills/${parked}/cancel`, admin, { body: { reason: 'x' } })).status, 409);
+  await api(`/bills/${parked}`, admin, { method: 'DELETE' });
+  const deleted = (await api('/bills?deleted=true', admin)).json;
+  assert.ok(deleted.some((b: any) => b.id === parked));
+  assert.equal((await api(`/bills/${parked}/permanent`, admin, { method: 'DELETE' })).status, 200);
+  assert.equal((await api(`/products/${prod.json.id}`, admin)).json.stock, 17);
 });
 
 test('waiting bills, walk-in validation, expense vouchers, reports', async () => {
@@ -155,9 +160,9 @@ test('waiting bills, walk-in validation, expense vouchers, reports', async () =>
   assert.match(exp.json.billNo, /-EXP-/);
 
   const summary = (await api('/reports/summary?preset=today', admin)).json;
-  assert.equal(summary.netSales, 40);
+  assert.equal(summary.netSales, 355); // 315 credit sale (kept – completed bills are never deleted) + 40
   assert.equal(summary.expenses, 15);
-  assert.equal(summary.netCollection, 140); // 40 sales + 115 customer payment − 15 expense
+  assert.equal(summary.netCollection, 240); // 100 + 40 received on sales + 115 customer payment − 15 expense
   const matrix = (await api('/reports/sales-matrix?preset=today', admin)).json;
   assert.ok(matrix.items.some((i: any) => i.name === 'Tea' && i.qty === 2));
 });

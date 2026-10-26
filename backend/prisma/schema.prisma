@@ -349,6 +349,7 @@ model Bill {
   cancelledByUserId     String?
   cancelledByUserName   String?
   cancelledAt           DateTime?
+  cancelReason          String?
   isDeleted             Boolean       @default(false)
   deletedByUserId       String?
   deletedByUserName     String?

@@ -95,7 +95,6 @@ class Cart extends ChangeNotifier {
   /// Set when a waiting bill or completed bill is loaded.
   String? billId;
   String? billNo;
-  bool editingCompleted = false;
   bool busy = false;
 
   bool get isEmpty => lines.isEmpty;
@@ -230,16 +229,17 @@ class Cart extends ChangeNotifier {
     billDate = null;
     billId = null;
     billNo = null;
-    editingCompleted = false;
     notifyListeners();
   }
 
-  /// Load a waiting bill (to continue) or a completed bill (to edit — server reverts on checkout).
-  void loadBill(Bill b, {Customer? customerObj}) {
+  /// Load a waiting order to continue it (same bill, paid through the normal Proceed flow), or with
+  /// [asNew] copy a cancelled bill's items into a brand-new bill (completed bills are never edited).
+  void loadBill(Bill b, {Customer? customerObj, bool asNew = false}) {
     clear();
-    billId = b.id;
-    billNo = b.billNo;
-    editingCompleted = !b.isWaiting;
+    if (!asNew) {
+      billId = b.id;
+      billNo = b.billNo;
+    }
     kind = b.kind;
     tableName = b.tableName;
     customer = customerObj;
@@ -261,7 +261,7 @@ class Cart extends ChangeNotifier {
         priceType: i.priceType == 'last' ? 'custom' : i.priceType,
         discount: i.discount,
         note: i.note,
-        kotPrinted: i.kotPrintedQuantity,
+        kotPrinted: asNew ? 0 : i.kotPrintedQuantity,
       ));
     }
     notifyListeners();
@@ -280,7 +280,6 @@ class Cart extends ChangeNotifier {
         'id': billId ?? const Uuid().v4(),
         'kind': kind,
         'status': status,
-        'editing': editingCompleted,
         if (tableName != null) 'tableName': tableName,
         if (customer != null) 'customerId': customer!.id,
         if (customer == null && customerPhone != null && customerPhone!.isNotEmpty) 'customerPhone': customerPhone,

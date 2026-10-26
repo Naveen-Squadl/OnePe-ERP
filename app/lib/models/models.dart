@@ -171,6 +171,21 @@ class Bill {
   double get roundOff => toDouble(raw['roundOff']);
   double get total => toDouble(raw['totalAmount']);
   double get received => toDouble(raw['receivedAmount']);
+
+  /// Display name of the payment mode: Cash, UPI, Card, Split, Credit, OnePe…
+  String get paymentLabel => switch (paymentMethod) {
+    'ONEPE' => 'OnePe',
+    'UPI' => 'UPI',
+    final m => m[0] + m.substring(1).toLowerCase(),
+  };
+
+  /// Split payment parts, e.g. "Cash ₹100.00 + UPI ₹50.00" (empty unless the bill is SPLIT).
+  List<(String, double)> get splitParts => paymentMethod != 'SPLIT'
+      ? const []
+      : [
+          for (final (label, key) in const [('Cash', 'cashAmount'), ('UPI', 'upiAmount'), ('Card', 'cardAmount')])
+            if (toDouble(raw[key]) > 0) (label, toDouble(raw[key])),
+        ];
   double get change => toDouble(raw['changeAmount']);
   double? get customerOpening => raw['customerOpeningBal'] == null ? null : toDouble(raw['customerOpeningBal']);
   double? get customerClosing => raw['customerClosingBal'] == null ? null : toDouble(raw['customerClosingBal']);
@@ -181,6 +196,7 @@ class Bill {
   bool get isCancelled => raw['isCancelled'] == true;
   bool get isDeleted => raw['isDeleted'] == true;
   String? get cancelledBy => raw['cancelledByUserName'];
+  String? get cancelReason => raw['cancelReason'];
   String? get deletedBy => raw['deletedByUserName'];
   List<BillItem> get items => (raw['items'] as List? ?? const []).map((e) => BillItem(Map<String, dynamic>.from(e))).toList();
   bool get isPendingSync => raw['_pending'] == true;

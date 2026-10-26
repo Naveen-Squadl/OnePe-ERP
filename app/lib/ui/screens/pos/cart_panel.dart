@@ -5,6 +5,7 @@ import '../../../core/format.dart';
 import '../../../core/theme.dart';
 import '../../../models/models.dart';
 import '../../../services/print_service.dart';
+import '../../../services/printer_config.dart';
 import '../../../state/cart.dart';
 import '../../../state/catalog.dart';
 import '../../../state/session.dart';
@@ -24,11 +25,9 @@ class CartPanel extends StatelessWidget {
     final session = context.watch<Session>();
     final banner = cart.isExpense
         ? ('EXPENSE VOUCHER (Outflow)', AppColors.amber, AppColors.navy)
-        : cart.editingCompleted
-            ? ('Editing Bill #${cart.billNo}', AppColors.coral, Colors.white)
-            : cart.billNo != null
-                ? ('Waiting Bill #${cart.billNo}${cart.tableName != null ? ' • ${cart.tableName}' : ''}', AppColors.amber, AppColors.navy)
-                : null;
+        : cart.billNo != null
+            ? ('Waiting Bill #${cart.billNo}${cart.tableName != null ? ' • ${cart.tableName}' : ''}', AppColors.amber, AppColors.navy)
+            : null;
     return ColoredBox(
       color: popOnDone ? AppColors.bg : Colors.white,
       child: SafeArea(
@@ -430,15 +429,31 @@ class _SummaryState extends State<_Summary> {
     }
   }
 
-  /// Proceed: ask Print / Collect / Print + Collect, save the bill (OnePe when collecting, otherwise
-  /// cash or credit), build its PDF and hand it to the printer and/or the OnePe payment app.
+  /// Proceed: ask Print / Collect / Print + Collect / Save, confirm the payment mode when OnePe collection
+  /// is off, save the bill (OnePe when collecting, else the confirmed mode or credit), build its PDF and hand it to the printer and/or the OnePe payment app.
   Future<void> _pay(BuildContext context) async {
     if (cart.isEmpty) return showSnack(context, 'Your cart is empty', error: true);
     final credit = cart.onCredit && cart.hasCustomer && !cart.isExpense;
-    final action = await askBillAction(context, total: cart.payable, allowCollect: !credit && !cart.isExpense, customer: cart.customer?.name);
+    final collect = PrinterConfig.onePeCollect;
+    final action = await askBillAction(context, total: cart.payable, allowCollect: collect && !credit && !cart.isExpense, customer: cart.customer?.name);
     if (action == null || !context.mounted) return;
-    final method = credit ? 'CREDIT' : (action.collects ? 'ONEPE' : 'CASH');
-    final bill = await guard(context, () => cart.checkout(paymentMethod: method, received: credit ? 0 : cart.payable));
+    // OnePe collection off: the cashier confirms how the money was received (paid sales only).
+    ManualPayment? paid;
+    if (!collect && !credit && !cart.isExpense) {
+      paid = await askPaymentReceived(context, total: cart.payable, customer: cart.customer?.name);
+      if (paid == null || !context.mounted) return;
+    }
+    final method = credit ? 'CREDIT' : (action.collects ? 'ONEPE' : paid?.method ?? 'CASH');
+    final bill = await guard(
+      context,
+      () => cart.checkout(
+        paymentMethod: method,
+        received: credit ? 0 : cart.payable,
+        cash: paid?.cash ?? 0,
+        upi: paid?.upi ?? 0,
+        card: paid?.card ?? 0,
+      ),
+    );
     if (bill == null || !context.mounted) return;
     context.read<Catalog>().load(); // refresh stock
     final panel = context.findAncestorWidgetOfExactType<CartPanel>();

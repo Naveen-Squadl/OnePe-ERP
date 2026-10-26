@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Bill, BillItem, BillKind, BillStatus, PaymentMethod, Prisma } from '@prisma/client';
+import { Bill, BillItem, BillKind, BillStatus, PaymentMethod, Prisma, Role } from '@prisma/client';
 import { prisma, Tx } from '../lib/prisma';
 import { num, round2, round3 } from '../lib/money';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors';
@@ -13,7 +13,7 @@ export const CheckoutSchema = z.object({
   id: z.string().uuid(),
   kind: z.nativeEnum(BillKind).default(BillKind.SALE),
   status: z.nativeEnum(BillStatus).default(BillStatus.COMPLETED),
-  /** true when an existing completed bill was loaded into the cart for editing. */
+  /** Legacy flag from old clients – editing completed bills is no longer allowed (rejected below). */
   editing: z.boolean().default(false),
   tableName: z.string().trim().nullish(),
   customerId: z.string().uuid().nullish(),
@@ -287,7 +287,9 @@ export async function checkout(user: AuthUser, shopId: string, branchId: string,
       const existing = await tx.bill.findUnique({ where: { id: input.id }, include: billInclude });
 
       if (existing && existing.shopId !== shopId) throw forbidden();
-      if (existing && existing.status === BillStatus.COMPLETED && !input.editing) {
+      if (existing && existing.status === BillStatus.COMPLETED) {
+        // A completed bill is an issued tax invoice: it is never changed. Corrections = cancel + new bill.
+        if (input.editing) throw conflict('Completed bills cannot be edited. Cancel the bill and create a new one.');
         // Idempotent replay from an offline device.
         return existing;
       }
@@ -310,7 +312,7 @@ export async function checkout(user: AuthUser, shopId: string, branchId: string,
 
       const lines = await priceItems(tx, shopId, branchId, customer?.id ?? null, input, settings);
 
-      const availablePoints = customer ? num(customer.loyaltyPoints) + (existing && input.editing ? num(existing.loyaltyPointsRedeemed) : 0) : 0;
+      const availablePoints = customer ? num(customer.loyaltyPoints) : 0;
       const redeemReq = settings.enableLoyaltyPoints ? Math.min(input.loyaltyPointsToRedeem, availablePoints) : 0;
       const totals = computeTotals(lines, input.discountType, input.discountValue, redeemReq, input.roundMode);
 
@@ -324,9 +326,6 @@ export async function checkout(user: AuthUser, shopId: string, branchId: string,
       }
       const change = customer && !input.giveChange ? 0 : Math.max(0, round2(received - totals.total));
 
-      if (existing && existing.status === BillStatus.COMPLETED && input.editing) {
-        await revertEffects(tx, existing, user, 'Reversed for Editing Bill: ');
-      }
       if (existing) await tx.billItem.deleteMany({ where: { billId: existing.id } });
 
       const billNo = existing?.billNo ?? (await nextBillNo(tx, shopId, shop.name, branch.code, input.kind, input.billDate ?? new Date()));
@@ -381,19 +380,21 @@ async function loadBill(tx: Tx, shopId: string, id: string) {
   return b;
 }
 
-const isEffective = (b: Bill) => b.status === BillStatus.COMPLETED && !b.isCancelled && !b.isDeleted;
-
-export async function cancelBill(user: AuthUser, shopId: string, id: string) {
+/** Cancel a completed bill (admin / manager): keeps its number, reverts stock and balances. */
+export async function cancelBill(user: AuthUser, shopId: string, id: string, reason: string) {
   return prisma.$transaction(async (tx) => {
     const b = await loadBill(tx, shopId, id);
     if (b.isCancelled) return b;
-    if (isEffective(b)) await revertEffects(tx, b, user, 'Reversed from Cancelled Bill: ');
+    if (b.status !== BillStatus.COMPLETED) throw conflict('Waiting orders are not billed yet – delete the order instead.');
+    if (b.isDeleted) throw conflict('Bill is deleted');
+    if (!reason.trim()) throw badRequest('Enter a reason for cancelling the bill');
+    await revertEffects(tx, b, user, 'Reversed from Cancelled Bill: ');
     const out = await tx.bill.update({
       where: { id },
-      data: { isCancelled: true, cancelledAt: new Date(), cancelledByUserId: user.id, cancelledByUserName: user.name },
+      data: { isCancelled: true, cancelledAt: new Date(), cancelledByUserId: user.id, cancelledByUserName: user.name, cancelReason: reason.trim() },
       include: billInclude,
     });
-    await logActivity(user, 'bill_cancelled', `Cancelled bill ${b.billNo}`, { billId: id, total: num(b.totalAmount) }, tx, shopId);
+    await logActivity(user, 'bill_cancelled', `Cancelled bill ${b.billNo}: ${reason.trim()}`, { billId: id, total: num(b.totalAmount), reason: reason.trim() }, tx, shopId);
     return out;
   });
 }
@@ -402,7 +403,7 @@ export async function softDeleteBill(user: AuthUser, shopId: string, id: string)
   return prisma.$transaction(async (tx) => {
     const b = await loadBill(tx, shopId, id);
     if (b.isDeleted) return b;
-    if (isEffective(b)) await revertEffects(tx, b, user, 'Reversed from Deleted Bill: ');
+    if (b.status === BillStatus.COMPLETED) throw conflict('Completed bills cannot be deleted. Cancel the bill instead.');
     const out = await tx.bill.update({
       where: { id },
       data: { isDeleted: true, deletedAt: new Date(), deletedByUserId: user.id, deletedByUserName: user.name },
@@ -417,11 +418,12 @@ export async function restoreBill(user: AuthUser, shopId: string, id: string) {
   return prisma.$transaction(async (tx) => {
     const b = await loadBill(tx, shopId, id);
     if (!b.isDeleted && !b.isCancelled) return b;
+    if (b.isCancelled && user.role !== Role.ADMIN && user.role !== Role.SUPER_ADMIN) throw forbidden('Only the shop admin can restore a cancelled bill');
     const out = await tx.bill.update({
       where: { id },
       data: {
         isDeleted: false, deletedAt: null, deletedByUserId: null, deletedByUserName: null,
-        isCancelled: false, cancelledAt: null, cancelledByUserId: null, cancelledByUserName: null,
+        isCancelled: false, cancelledAt: null, cancelledByUserId: null, cancelledByUserName: null, cancelReason: null,
       },
       include: billInclude,
     });
@@ -437,7 +439,7 @@ export async function restoreBill(user: AuthUser, shopId: string, id: string) {
 export async function permanentlyDeleteBill(user: AuthUser, shopId: string, id: string) {
   return prisma.$transaction(async (tx) => {
     const b = await loadBill(tx, shopId, id);
-    if (isEffective(b)) await revertEffects(tx, b, user, 'Reversed from Deleted Bill: ');
+    if (b.status === BillStatus.COMPLETED) throw conflict('Completed bills are kept for the record and cannot be deleted.');
     await tx.bill.delete({ where: { id } });
     await logActivity(user, 'bill_deleted', `Permanently deleted bill ${b.billNo}`, { billId: id, permanent: true }, tx, shopId);
   });

@@ -240,11 +240,11 @@ class _BillCard extends StatelessWidget {
                   Row(children: [
                     meta(Icons.shopping_bag_outlined, '${b.items.length} Items'),
                     const SizedBox(width: 14),
-                    meta(Icons.payments_outlined, b.paymentMethod == 'ONEPE' ? 'OnePe' : b.paymentMethod[0] + b.paymentMethod.substring(1).toLowerCase()),
+                    meta(Icons.payments_outlined, b.paymentLabel),
                   ]),
                   if (b.userName != null) meta(Icons.badge_outlined, 'Billed by: ${b.userName}', color: AppColors.blue),
                   if (b.isDeleted && b.deletedBy != null) meta(Icons.delete_outline, 'Deleted by: ${b.deletedBy}', color: AppColors.danger),
-                  if (b.isCancelled && b.cancelledBy != null) meta(Icons.block, 'Cancelled by: ${b.cancelledBy}', color: AppColors.danger),
+                  if (b.isCancelled && b.cancelledBy != null) meta(Icons.block, 'Cancelled by: ${b.cancelledBy}${b.cancelReason != null ? ' – ${b.cancelReason}' : ''}', color: AppColors.danger),
                 ]),
               ),
               Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
@@ -252,11 +252,14 @@ class _BillCard extends StatelessWidget {
                     style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: AppColors.blue, decoration: b.isCancelled ? TextDecoration.lineThrough : null)),
                 const SizedBox(height: 8),
                 Row(mainAxisSize: MainAxisSize.min, children: [
-                  if (!b.isDeleted && !b.isCancelled && session.can('bills.create')) RowAction(Icons.edit, AppColors.blue, b.isWaiting ? 'Continue Order' : 'Edit', () => _editBill(context, b)),
-                  if (!b.isDeleted && !b.isCancelled && session.can('bills.cancel')) RowAction(Icons.block, AppColors.orange, 'Cancel Bill', () => _cancel(context, b, onChanged)),
-                  if (!b.isDeleted && session.can('bills.delete')) RowAction(Icons.delete_outline, AppColors.danger, 'Delete', () => _delete(context, b, onChanged)),
-                  if ((b.isDeleted || b.isCancelled) && session.can('bills.delete')) RowAction(Icons.restore, AppColors.green, 'Restore', () => _restore(context, b, onChanged)),
-                  if (b.isDeleted && session.can('bills.delete')) RowAction(Icons.delete_forever, AppColors.danger, 'Delete Forever', () => _purge(context, b, onChanged)),
+                  // Waiting orders (not billed yet): continue or delete.
+                  if (b.isWaiting && !b.isDeleted && session.can('bills.create')) RowAction(Icons.edit, AppColors.blue, 'Continue Order', () => _continueOrder(context, b)),
+                  if (b.isWaiting && !b.isDeleted && session.can('bills.delete')) RowAction(Icons.delete_outline, AppColors.danger, 'Delete Order', () => _delete(context, b, onChanged)),
+                  // Completed bills are issued invoices: cancel only (restore is for the shop admin).
+                  if (!b.isWaiting && !b.isDeleted && !b.isCancelled && session.can('bills.cancel')) RowAction(Icons.block, AppColors.orange, 'Cancel Bill', () => _cancel(context, b, onChanged)),
+                  if (b.isCancelled && !b.isDeleted && (session.user?.isAdmin ?? false)) RowAction(Icons.restore, AppColors.green, 'Restore', () => _restore(context, b, onChanged)),
+                  if (b.isDeleted && session.can('bills.delete')) RowAction(Icons.restore, AppColors.green, 'Restore', () => _restore(context, b, onChanged)),
+                  if (b.isDeleted && b.isWaiting && session.can('bills.delete')) RowAction(Icons.delete_forever, AppColors.danger, 'Delete Forever', () => _purge(context, b, onChanged)),
                 ]),
               ]),
             ]),
@@ -272,43 +275,87 @@ Future<void> _act(BuildContext context, Future<dynamic> Function() f, String ok,
   if (r != null) await onChanged();
 }
 
-Future<void> _editBill(BuildContext context, Bill b) async {
-  final ok = b.isWaiting || await confirm(context, 'Edit Bill', 'Load Bill #${b.billNo} into the cart? Its original stock and balances will be reverted. Checkout will overwrite this bill.');
-  if (!ok || !context.mounted) return;
+Future<void> _continueOrder(BuildContext context, Bill b, {bool asNew = false}) async {
   Customer? cu;
   if (b.customerId != null) cu = Customer(Map<String, dynamic>.from(await Api.instance.get('/customers/${b.customerId}')));
   if (!context.mounted) return;
-  context.read<Cart>().loadBill(b, customerObj: cu);
+  context.read<Cart>().loadBill(b, customerObj: cu, asNew: asNew);
   context.go('/pos');
-  showSnack(context, b.isWaiting ? 'Loaded waiting bill for ${b.tableName ?? b.billNo}' : 'Loaded Bill #${b.billNo} for editing');
+  showSnack(context, asNew ? 'Items of #${b.billNo} loaded into a new bill' : 'Loaded waiting bill for ${b.tableName ?? b.billNo}');
 }
 
+/// Cancel a completed bill: a reason is required; optionally load its items into a new bill (re-bill).
 Future<void> _cancel(BuildContext context, Bill b, Future<void> Function() onChanged) async {
-  if (await confirm(context, 'Cancel Bill', 'Mark Bill #${b.billNo} as cancelled? This is usually for returns or mistakes.', ok: 'Cancel Bill', danger: true) && context.mounted) {
-    await _act(context, () => Api.instance.post('/bills/${b.id}/cancel'), 'Bill cancelled', onChanged);
-  }
+  final reason = TextEditingController();
+  var rebill = false;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (c) => StatefulBuilder(
+      builder: (c, setState) => AlertDialog(
+        title: const Text('Cancel Bill'),
+        content: SizedBox(
+          width: 420,
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Bill #${b.billNo} (${money(b.total)}) will be marked cancelled. Its number is kept; stock and balances are reverted.'),
+            const SizedBox(height: 14),
+            TextField(
+              controller: reason,
+              autofocus: true,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(labelText: 'Reason *', hintText: 'e.g. Wrong item, customer returned'),
+              onChanged: (_) => setState(() {}),
+            ),
+            if (context.read<Session>().can('bills.create'))
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: rebill,
+                onChanged: (v) => setState(() => rebill = v ?? false),
+                title: const Text('Load items into a new bill'),
+                subtitle: const Text('To correct and re-bill'),
+              ),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Keep Bill')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(c).colorScheme.error),
+            onPressed: reason.text.trim().isEmpty ? null : () => Navigator.pop(c, true),
+            child: const Text('Cancel Bill'),
+          ),
+        ],
+      ),
+    ),
+  );
+  if (ok != true || !context.mounted) return;
+  final r = await guard(context, () => Api.instance.post('/bills/${b.id}/cancel', {'reason': reason.text.trim()}), success: 'Bill cancelled');
+  if (r == null || !context.mounted) return;
+  await onChanged();
+  if (rebill && context.mounted) await _continueOrder(context, b, asNew: true);
 }
 
 Future<void> _delete(BuildContext context, Bill b, Future<void> Function() onChanged) async {
-  if (await confirm(context, 'Delete Bill', 'Are you sure you want to delete Bill #${b.billNo}? Stock and balances will be reverted.', ok: 'Delete', danger: true) && context.mounted) {
-    await _act(context, () => Api.instance.delete('/bills/${b.id}'), 'Bill deleted', onChanged);
+  if (await confirm(context, 'Delete Order', 'Delete waiting order ${b.tableName ?? '#${b.billNo}'}? It has not been billed yet.', ok: 'Delete', danger: true) && context.mounted) {
+    await _act(context, () => Api.instance.delete('/bills/${b.id}'), 'Order deleted', onChanged);
   }
 }
 
 Future<void> _restore(BuildContext context, Bill b, Future<void> Function() onChanged) async {
-  if (await confirm(context, 'Restore Bill', 'Are you sure you want to restore Bill #${b.billNo}? This will re-deduct the stock items.') && context.mounted) {
+  if (await confirm(context, 'Restore Bill', b.isCancelled
+          ? 'Restore cancelled Bill #${b.billNo}? Stock and balances will be applied again.'
+          : 'Restore order #${b.billNo} to the waiting list?') && context.mounted) {
     await _act(context, () => Api.instance.post('/bills/${b.id}/restore'), 'Bill restored', onChanged);
   }
 }
 
 Future<void> _purge(BuildContext context, Bill b, Future<void> Function() onChanged) async {
-  if (await confirm(context, 'Permanently Delete', 'Are you sure you want to permanently delete Bill #${b.billNo}? This cannot be undone and will remove it completely.', ok: 'Delete Forever', danger: true) &&
+  if (await confirm(context, 'Permanently Delete', 'Permanently delete waiting order #${b.billNo}? This cannot be undone.', ok: 'Delete Forever', danger: true) &&
       context.mounted) {
     await _act(context, () => Api.instance.delete('/bills/${b.id}/permanent'), 'Bill permanently deleted', onChanged);
   }
 }
 
-/// "Bill Details" dialog with Preview / Edit / Print.
+/// "Bill Details" dialog with Preview / Continue (waiting) or Cancel (completed) / Print.
 Future<void> showBillDetail(BuildContext context, Bill b, Future<void> Function() onChanged) async {
   final session = context.read<Session>();
   Widget kv(String k, String v) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -322,14 +369,34 @@ Future<void> showBillDetail(BuildContext context, Bill b, Future<void> Function(
           Text(v, style: TextStyle(fontWeight: FontWeight.w700, fontSize: big ? 22 : 14, color: big ? AppColors.blue : null)),
         ]),
       );
+  // Equal-size footer buttons: icon above the label so all three fit on a 2" terminal screen.
+  Widget action(IconData icon, String label, VoidCallback onPressed, {bool filled = true}) {
+    final child = Column(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, size: 20),
+      const SizedBox(height: 2),
+      Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+    ]);
+    final style = ButtonStyle(
+      minimumSize: const WidgetStatePropertyAll(Size(0, 58)),
+      padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 6, vertical: 8)),
+      shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+    );
+    return Expanded(
+      child: filled
+          ? FilledButton(style: style, onPressed: onPressed, child: child)
+          : OutlinedButton(style: style, onPressed: onPressed, child: child),
+    );
+  }
+
   await showDialog(
     context: context,
     builder: (c) => Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 500, maxHeight: 640),
+        constraints: const BoxConstraints(maxWidth: 500, maxHeight: 680),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 20, 12, 0),
+            padding: const EdgeInsets.fromLTRB(20, 20, 8, 0),
             child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -343,7 +410,7 @@ Future<void> showBillDetail(BuildContext context, Bill b, Future<void> Function(
             ]),
           ),
           Flexible(
-            child: ListView(shrinkWrap: true, padding: const EdgeInsets.fromLTRB(24, 16, 24, 8), children: [
+            child: ListView(shrinkWrap: true, padding: const EdgeInsets.fromLTRB(20, 16, 20, 8), children: [
               Row(children: [
                 Expanded(child: kv('Date', dateOnly(b.billDate))),
                 Expanded(child: kv('Time', DateFormat('hh:mm a').format(b.billDate.toLocal()))),
@@ -375,35 +442,35 @@ Future<void> showBillDetail(BuildContext context, Bill b, Future<void> Function(
               if (b.loyaltyRedeemed > 0) sum('Points Discount', '-${money(b.loyaltyRedeemed)}'),
               if (b.roundOff != 0) sum('Round Off', '${b.roundOff > 0 ? '+' : '-'}${money(b.roundOff.abs())}'),
               sum('Grand Total', money(b.total).replaceAll('.00', ''), big: true),
-              sum('Payment', '${b.paymentMethod} • ${money(b.received - b.change)}'),
+              sum('Payment', '${b.paymentLabel} • ${money(b.received - b.change)}'),
+              for (final (label, amt) in b.splitParts) sum('   $label', money(amt)),
+              if (b.change > 0) sum('Change returned', money(b.change)),
               if (b.customerClosing != null) sum('Customer Balance', '${money(b.customerOpening)} → ${money(b.customerClosing)}'),
               if (b.userName != null) sum('Billed by', b.userName!),
+              if (b.isCancelled) sum('Cancelled by', b.cancelledBy ?? '-'),
+              if (b.isCancelled && b.cancelReason != null) sum('Reason', b.cancelReason!),
             ]),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
             child: Row(children: [
-              Expanded(
-                child: OutlinedButton.icon(onPressed: () => showReceiptPreview(c, b, session), icon: const Icon(Icons.preview, size: 18), label: const Text('Preview')),
-              ),
-              const SizedBox(width: 10),
-              if (!b.isDeleted && !b.isCancelled && session.can('bills.create')) ...[
-                Expanded(
-                  child: FilledButton.icon(
-                    style: FilledButton.styleFrom(backgroundColor: AppColors.blue),
-                    onPressed: () {
-                      Navigator.pop(c);
-                      _editBill(context, b);
-                    },
-                    icon: const Icon(Icons.edit, size: 18),
-                    label: const Text('Edit'),
-                  ),
-                ),
+              action(Icons.preview, 'Preview', () => showReceiptPreview(c, b, session), filled: false),
+              if (b.isWaiting && !b.isDeleted && session.can('bills.create')) ...[
                 const SizedBox(width: 10),
+                action(Icons.edit, 'Continue', () {
+                  Navigator.pop(c);
+                  _continueOrder(context, b);
+                }, filled: false),
               ],
-              Expanded(
-                child: FilledButton.icon(onPressed: () => guard(c, () => PrintService.printBill(b, session.shop!, branch: session.activeBranch)), icon: const Icon(Icons.print, size: 18), label: const Text('Print')),
-              ),
+              if (!b.isWaiting && !b.isDeleted && !b.isCancelled && session.can('bills.cancel')) ...[
+                const SizedBox(width: 10),
+                action(Icons.block, 'Cancel', () {
+                  Navigator.pop(c);
+                  _cancel(context, b, onChanged);
+                }, filled: false),
+              ],
+              const SizedBox(width: 10),
+              action(Icons.print, 'Print', () => guard(c, () => PrintService.printBill(b, session.shop!, branch: session.activeBranch))),
             ]),
           ),
           if (b.customerContact != null)
@@ -431,8 +498,9 @@ Future<void> showReceiptPreview(BuildContext context, Bill b, Session session) {
   return showDialog(
     context: context,
     builder: (c) => Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 400, maxHeight: 640),
+        constraints: const BoxConstraints(maxWidth: 400, maxHeight: 680),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 18, 12, 6),
@@ -444,7 +512,7 @@ Future<void> showReceiptPreview(BuildContext context, Bill b, Session session) {
           const Divider(height: 1),
           Flexible(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(12),
               child: Container(
                 color: Colors.white,
                 padding: const EdgeInsets.all(16),
@@ -454,9 +522,10 @@ Future<void> showReceiptPreview(BuildContext context, Bill b, Session session) {
                   if (shop.contactNumber != null) Text('Tel: ${shop.contactNumber}', textAlign: TextAlign.center, style: mono),
                   if (shop.gstNumber != null) Text('GSTIN: ${shop.gstNumber}', textAlign: TextAlign.center, style: mono),
                   const SizedBox(height: 12),
-                  const Text('TAX INVOICE', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                  Text(b.isCancelled ? 'TAX INVOICE – CANCELLED' : 'TAX INVOICE', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: b.isCancelled ? AppColors.danger : null)),
                   const Divider(),
-                  line('Bill No: ${b.billNo}', DateFormat('dd-MM-yyyy HH:mm').format(b.billDate.toLocal())),
+                  line('Bill No:', b.billNo),
+                  line('Date:', DateFormat('dd-MM-yyyy HH:mm').format(b.billDate.toLocal())),
                   if (b.customerName != null) line('Customer: ${b.customerName}', b.customerContact ?? ''),
                   const Divider(),
                   Row(children: const [
@@ -483,6 +552,11 @@ Future<void> showReceiptPreview(BuildContext context, Bill b, Session session) {
                   if (b.roundOff != 0) line('Round Off:', '${b.roundOff > 0 ? '+' : '-'}${money(b.roundOff.abs())}'),
                   const Divider(),
                   line('GRAND TOTAL:', money(b.total), bold: true, size: 16),
+                  const Divider(),
+                  line('Payment:', b.paymentLabel),
+                  for (final (label, amt) in b.splitParts) line('  $label:', money(amt)),
+                  if (b.received > 0) line('Received:', money(b.received)),
+                  if (b.change > 0) line('Change:', money(b.change)),
                   const Divider(),
                   if (b.userName != null) Text('Billed by: ${b.userName}', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
                   Text(shop.thanksNote ?? 'Thank you for visiting!', textAlign: TextAlign.center, style: const TextStyle(fontStyle: FontStyle.italic, fontSize: 12)),

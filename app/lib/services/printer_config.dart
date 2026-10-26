@@ -104,6 +104,10 @@ class PrinterConfig {
   static bool kotSameAsBill = true;
   static PrinterTarget get kot => kotSameAsBill ? bill : kitchen;
 
+  /// Offer Collect Payment / Print + Collect (OnePe payment app) after Proceed. On unless turned off in
+  /// Settings; when off, the cashier confirms how the payment was received (cash / UPI / card / split).
+  static bool onePeCollect = true;
+
   /// Native printers exist only in the Android build.
   static bool get nativeAvailable => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
@@ -127,6 +131,12 @@ class PrinterConfig {
     bill._load(p, fallback);
     kitchen._load(p, PrinterType.system);
     kotSameAsBill = p.getBool('kotPrinter.sameAsBill') ?? true;
+    onePeCollect = p.getBool('onepe.collect') ?? true;
+  }
+
+  static Future<void> setOnePeCollect(bool v) async {
+    onePeCollect = v;
+    await (await SharedPreferences.getInstance()).setBool('onepe.collect', v);
   }
 
   static Future<void> setKotSameAsBill(bool v) async {

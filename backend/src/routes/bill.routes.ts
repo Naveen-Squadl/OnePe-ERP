@@ -64,14 +64,14 @@ billRouter.post('/:id/kot', requirePermission('bills.create'), async (req, res) 
 });
 
 billRouter.post('/:id/cancel', requirePermission('bills.cancel'), async (req, res) => {
-  res.json(await cancelBill(req.user!, shopIdOf(req), req.params.id));
+  res.json(await cancelBill(req.user!, shopIdOf(req), req.params.id, String(req.body?.reason ?? '')));
 });
 
 billRouter.delete('/:id', requirePermission('bills.delete'), async (req, res) => {
   res.json(await softDeleteBill(req.user!, shopIdOf(req), req.params.id));
 });
 
-billRouter.post('/:id/restore', requirePermission('bills.delete'), async (req, res) => {
+billRouter.post('/:id/restore', requirePermission('bills.cancel', 'bills.delete'), async (req, res) => {
   res.json(await restoreBill(req.user!, shopIdOf(req), req.params.id));
 });
 

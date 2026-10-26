@@ -46,8 +46,6 @@ class PrintService {
     ]);
   }
 
-  static String _method(String m) => m == 'ONEPE' ? 'OnePe' : m;
-
   /// Dashed separator across the full paper width (any roll size).
   static pw.Widget _dash() => pw.Divider(height: 8, thickness: 0.8, color: PdfColors.black, borderStyle: pw.BorderStyle.dashed);
 
@@ -72,7 +70,7 @@ class PrintService {
             if (shop.gstNumber != null) pw.Text('GSTIN: ${shop.gstNumber}', textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 7)),
           ],
           pw.SizedBox(height: 4),
-          pw.Text(b.isExpense ? 'EXPENSE VOUCHER' : 'TAX INVOICE',
+          pw.Text('${b.isExpense ? 'EXPENSE VOUCHER' : 'TAX INVOICE'}${b.isCancelled ? ' - CANCELLED' : ''}',
               textAlign: pw.TextAlign.center, style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
           _dash(),
           if (s.showBillDetails) ...[
@@ -107,7 +105,8 @@ class PrintService {
           if (b.loyaltyRedeemed > 0) _row('Points Redeemed:', '-${_rs(b.loyaltyRedeemed)}'),
           if (b.roundOff != 0) _row('Round Off:', '${b.roundOff > 0 ? '+' : '-'}${_rs(b.roundOff.abs())}'),
           _row('GRAND TOTAL:', _rs(b.total), bold: true, size: 10),
-          _row('Payment:', _method(b.paymentMethod)),
+          _row('Payment:', b.paymentLabel),
+          for (final (label, amt) in b.splitParts) _row('  $label:', _rs(amt)),
           if (b.received > 0) _row('Received:', _rs(b.received)),
           if (b.change > 0) _row('Change:', _rs(b.change)),
           if (s.showCustomerAccount && b.customerOpening != null) ...[
@@ -161,11 +160,11 @@ class PrintService {
           ),
           pw.SizedBox(width: 12),
           pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
-            pw.Text('TAX INVOICE', style: pw.TextStyle(fontSize: a5 ? 13 : 16, fontWeight: pw.FontWeight.bold)),
+            pw.Text(b.isCancelled ? 'TAX INVOICE - CANCELLED' : 'TAX INVOICE', style: pw.TextStyle(fontSize: a5 ? 13 : 16, fontWeight: pw.FontWeight.bold)),
             pw.Text('Invoice No: ${b.billNo}'),
             pw.Text('Date: ${dateTime(b.billDate)}'),
             if (branch != null) pw.Text('Branch: ${branch.name}'),
-            pw.Text('Payment Mode: ${_method(b.paymentMethod)}'),
+            pw.Text('Payment Mode: ${b.paymentLabel}${b.splitParts.isEmpty ? '' : ' (${b.splitParts.map((p) => '${p.$1} ${_rs(p.$2)}').join(' + ')})'}'),
           ]),
         ]),
         pw.SizedBox(height: 16),

@@ -57,14 +57,17 @@ cashier `cashier@onepe.local / Cashier@123`.
 ### Android
 The phone talks to the **API**, never to Postgres directly.
 - USB: enable USB debugging → `adb reverse tcp:4000 tcp:4000` → `flutter run --release --dart-define=API_URL=http://localhost:4000`
-- Wi-Fi: `flutter build apk --release --dart-define=API_URL=http://<mac-lan-ip>:4000` (Mac IP was 192.168.0.31 on 2026-10-15; check `ipconfig getifaddr en0`).
+- Wi-Fi: `flutter build apk --release --dart-define=API_URL=http://<mac-lan-ip>:4000` (Mac IP 192.168.0.31 on 2026-10-24; check `ipconfig getifaddr en0`).
 - Emulator: `API_URL=http://10.0.2.2:4000`.
 - `usesCleartextTraffic="true"` is set in AndroidManifest for dev HTTP — remove for production (HTTPS).
-- Android/iOS builds have **not yet been compiled/tested** on a device.
+- Release APK runs on the user's Nexgo N82 (2026-10-24); iOS not yet built. Release builds need `isMinifyEnabled = false` (Nexgo SDK).
 
 ## Conventions & gotchas
 - Server is authoritative for money: `billing.service.ts` `computeLine/computeTotals`; `app/lib/state/cart.dart` mirrors them for preview only. Change both together.
-- Bills use **client-generated UUIDs**; `POST /bills/checkout` is idempotent (offline replay). `editing: true` reverts stock/balances then re-applies.
+- Bills use **client-generated UUIDs**; `POST /bills/checkout` is idempotent (offline replay).
+- **Completed bills are issued tax invoices – never edited or deleted** (API returns 409; `editing: true` is rejected). Only **Cancel**
+  (admin/manager, reason required → `Bill.cancelReason`, number kept, stock/balances reverted, optional "load items into a new bill");
+  **Restore** of a cancelled bill is shop-admin only. Waiting orders (not billed yet) can be continued (normal Proceed/payment flow) or deleted.
 - Stock: per-branch `ProductBranch.stock` + FIFO `StockBatch`; bill items store `batchAllocations` so reversals restore exact batches. Every change writes a `StockMovement`. Negative stock is allowed.
 - Bill number: `<SHOP INITIALS>-<BRANCH CODE>[-EXP]-<YYYYMMDD>-<SEQ3>` (e.g. `ODB-MAIN-20261015-001`), via `lib/sequence.ts`.
 - Permissions: `src/lib/permissions.ts` role matrix; routes use `requirePermission(...)`; Flutter hides menu items via `session.can(...)`.
@@ -79,11 +82,13 @@ The phone talks to the **API**, never to Postgres directly.
   Tokens live in `app/lib/core/theme.dart` (`AppColors`); primary action = lime with navy text (`GreenButton`, name kept); blue rounded app bars; lime "step" strip
   under blue panels is the brand element. POS: phone = blue header + floating navy dock with lime cart button; wide (≥900) = navy side rail + cart panel.
   Check phone layouts at 360×640 (5.5").
-- Checkout: cart **Proceed** → pop-up Print Bill / Collect Payment / Print + Collect (`pos/bill_actions.dart`) → bill saved (`ONEPE` when collecting,
-  else CASH/CREDIT) → bill PDF → printer and/or OnePe payment app (multipart POST `pdf` + `images` to `http://127.0.0.1:8080/` on the terminal).
+- Checkout: cart **Proceed** → pop-up Print Bill / Collect Payment / Print + Collect / Save without printing (`pos/bill_actions.dart`;
+  the two Collect options only when Settings → Payments → OnePe payment collection is on – saved on the device, default on everywhere; when off, a
+  "Payment received?" pop-up asks Cash / UPI / Card / Split with per-mode amounts that must equal the total) → bill saved (`ONEPE` when collecting,
+  else the confirmed mode, or CREDIT) → bill PDF → printer and/or OnePe payment app (multipart POST `pdf` + `images` to `http://127.0.0.1:8080/` on the terminal).
 - Printing: per-device `PrinterConfig` (SharedPreferences) with two `PrinterTarget`s – `bill` and `kitchen` (KOT; used only when
   "Same as bill printer" is off). Each: Nexgo N82 (2" only), Bluetooth ESC/POS raster (2"/3"/4", bill also A5/A4) or system dialog.
   Native code: `android/app/src/main/java/com/onepe/onepe_pos/` (PrinterChannel, PdfRaster, NexgoPrinter, BluetoothEscPos) + `libs/ps-n86Release-v2.1.10.aar`
   (Nexgo SDK, taken from `OnePe-Android-Printer-Plugin-main`). Channel `onepe/printer`.
 - Don't add attribution/branding of the original anywhere; don't commit `.env` or `uploads/`.
-- Not a git repo yet — ask before `git init`/committing.
+- Git repo on GitHub; commit/push only when the user asks ("git push").

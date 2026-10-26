@@ -6,6 +6,7 @@ import '../../core/config.dart';
 import '../../models/models.dart';
 import '../../services/offline_queue.dart';
 import '../../services/print_service.dart';
+import '../../services/printer_config.dart';
 import '../../state/catalog.dart';
 import '../../state/session.dart';
 import '../widgets/app_shell.dart';
@@ -177,6 +178,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 subtitle: Text((_s['storageLocations'] as List?)?.join(', ') ?? 'Showroom, Warehouse'),
                 trailing: const Icon(Icons.edit),
                 onTap: () => _editList('storageLocations', 'Storage Locations', 'New Storage Location (e.g. Rack B, Godown 1)'),
+              ),
+            ]),
+            _section('Payments', [
+              SwitchListTile(
+                title: const Text('OnePe payment collection'),
+                subtitle: Text(
+                  PrinterConfig.onePeCollect
+                      ? 'Collect Payment and Print + Collect are shown after Proceed'
+                      : 'Off – after Proceed, confirm the amount received by Cash, UPI, Card or Split',
+                ),
+                value: PrinterConfig.onePeCollect,
+                onChanged: (v) async {
+                  await PrinterConfig.setOnePeCollect(v);
+                  if (mounted) setState(() {});
+                },
               ),
             ]),
             _section('Printer Settings', [
