@@ -1,8 +1,10 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../core/api.dart';
 import '../../core/theme.dart';
+import '../../services/offline_photos.dart';
 import 'common.dart';
 
 /// OnePe logo from the brand assets. [lime] for blue/navy backgrounds, blue for light ones;
@@ -158,11 +160,14 @@ class CornerBadge extends StatelessWidget {
 }
 
 /// Product photo, or the default placeholder on brand Cream.
+/// Product photo / logo. Lists and tiles get the server's thumbnail, kept on the device for offline use
+/// ([OfflinePhotos]); [full] loads the original (photo editor).
 class ProductImage extends StatelessWidget {
   final String? url;
   final double iconSize;
   final BorderRadius? radius;
-  const ProductImage({super.key, this.url, this.iconSize = 26, this.radius});
+  final bool full;
+  const ProductImage({super.key, this.url, this.iconSize = 26, this.radius, this.full = false});
 
   @override
   Widget build(BuildContext context) {
@@ -171,10 +176,24 @@ class ProductImage extends StatelessWidget {
       alignment: Alignment.center,
       child: Icon(Icons.image_outlined, color: const Color(0xFF8C8A5E), size: iconSize),
     );
-    final full = Api.mediaUrl(url);
-    final child = full == null
-        ? placeholder
-        : Image.network(full, fit: BoxFit.cover, width: double.infinity, height: double.infinity, errorBuilder: (_, _, _) => placeholder);
+    final src = full ? Api.mediaUrl(url) : Api.thumbUrl(url);
+    final Widget child;
+    if (src == null) {
+      child = placeholder;
+    } else if (!full && OfflinePhotos.active) {
+      child = CachedNetworkImage(
+        imageUrl: src,
+        cacheManager: OfflinePhotos.cache,
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity,
+        fadeInDuration: Duration.zero,
+        placeholder: (_, _) => placeholder,
+        errorWidget: (_, _, _) => placeholder,
+      );
+    } else {
+      child = Image.network(src, fit: BoxFit.cover, width: double.infinity, height: double.infinity, errorBuilder: (_, _, _) => placeholder);
+    }
     return radius == null ? child : ClipRRect(borderRadius: radius!, child: child);
   }
 }
@@ -272,7 +291,7 @@ class _PhotoPickerBoxState extends State<PhotoPickerBox> {
                 ? const Center(child: CircularProgressIndicator())
                 : widget.url != null
                     ? Stack(fit: StackFit.expand, children: [
-                        ProductImage(url: widget.url),
+                        ProductImage(url: widget.url, full: true),
                         const Positioned(right: 6, bottom: 6, child: CircleAvatar(radius: 14, backgroundColor: Colors.white, child: Icon(Icons.edit, size: 16))),
                       ])
                     : Column(mainAxisAlignment: MainAxisAlignment.center, children: [

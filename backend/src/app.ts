@@ -5,7 +5,7 @@ import morgan from 'morgan';
 import { Prisma } from '@prisma/client';
 import { ApiError } from './lib/errors';
 import { routes } from './routes';
-import { UPLOAD_DIR } from './routes/upload.routes';
+import { thumbnails, UPLOAD_DIR } from './routes/upload.routes';
 
 export function createApp() {
   const app = express();
@@ -25,7 +25,7 @@ export function createApp() {
   app.get('/health', (_req, res) => {
     res.json({ ok: true });
   });
-  app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '30d', immutable: true }));
+  app.use('/uploads', thumbnails, express.static(UPLOAD_DIR, { maxAge: '30d', immutable: true }));
   app.use('/api', routes);
 
   app.use((_req, res) => {

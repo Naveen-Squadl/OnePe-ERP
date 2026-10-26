@@ -3,7 +3,10 @@ import 'package:provider/provider.dart';
 
 import 'core/config.dart';
 import 'core/theme.dart';
+import 'services/offline_photos.dart';
+import 'services/offline_queue.dart';
 import 'services/printer_config.dart';
+import 'services/user_activity.dart';
 import 'state/cart.dart';
 import 'state/catalog.dart';
 import 'state/session.dart';
@@ -12,14 +15,20 @@ import 'ui/router.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   PrinterConfig.load();
+  final cart = Cart();
+  // A sale in progress counts as activity: old offline bills upload only when the cart is empty and idle.
+  UserActivity.busy = () => cart.lines.isNotEmpty || cart.busy;
+  UserActivity.start();
+  OfflineQueue.start();
+  OfflinePhotos.load();
   final session = Session()..restore();
   runApp(MultiProvider(
     providers: [
       ChangeNotifierProvider.value(value: session),
       ChangeNotifierProvider(create: (_) => Catalog()),
-      ChangeNotifierProvider(create: (_) => Cart()),
+      ChangeNotifierProvider.value(value: cart),
     ],
-    child: OnePeApp(session: session),
+    child: Listener(behavior: HitTestBehavior.translucent, onPointerDown: (_) => UserActivity.touch(), child: OnePeApp(session: session)),
   ));
 }
 

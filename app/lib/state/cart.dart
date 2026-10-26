@@ -172,8 +172,9 @@ class Cart extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// [c] may be a mobile-only customer picked offline ([Customer.isNew]) – created by the server on sync.
   void setCustomer(Customer? c, {String? phone, String? name}) {
-    customer = c;
+    customer = c != null && c.isNew ? null : c;
     customerPhone = c?.phone ?? phone;
     customerName = c?.name ?? name;
     loyaltyRedeem = 0;
@@ -322,7 +323,12 @@ class Cart extends ChangeNotifier {
     return kot;
   }
 
-  /// Complete the sale. Falls back to the offline queue on network failure.
+  /// Complete the sale. Goes straight to the server when it is reachable (giving up after
+  /// [checkoutTimeout]); when the app already knows it is offline, or the request fails, the bill is
+  /// saved to the offline queue at once – no waiting. A bill that reached the server after all is
+  /// reported as a duplicate when the queue syncs (same bill id), so it is never billed twice.
+  static const checkoutTimeout = Duration(seconds: 10);
+
   Future<Bill> checkout({
     required String paymentMethod,
     double? received,
@@ -346,7 +352,8 @@ class Cart extends ChangeNotifier {
     );
     final payable = this.payable;
     try {
-      final res = await _api.post('/bills/checkout', payload);
+      if (!Api.online.value) throw ApiException(0, 'offline');
+      final res = await _api.postWithin(checkoutTimeout, '/bills/checkout', payload);
       final bill = Bill(Map<String, dynamic>.from(res));
       clear();
       return bill;

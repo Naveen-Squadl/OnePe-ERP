@@ -4,15 +4,14 @@ import 'package:provider/provider.dart';
 import '../../core/api.dart';
 import '../../core/config.dart';
 import '../../models/models.dart';
-import '../../services/offline_queue.dart';
 import '../../services/print_service.dart';
 import '../../services/printer_config.dart';
-import '../../state/catalog.dart';
 import '../../state/session.dart';
 import '../widgets/app_shell.dart';
 import '../widgets/brand.dart';
 import '../widgets/common.dart';
 import '../widgets/form_dialog.dart';
+import 'offline_data_tiles.dart';
 import 'printer_settings.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -140,6 +139,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                 child: DropdownButtonFormField<String>(
+                  initialValue: _type,
+                  decoration: InputDecoration(labelText: 'Shop Type', helperText: _isAdmin ? 'Changing this adjusts the POS interface' : 'Only Admins can change Shop Type'),
+                  items: const [
+                    DropdownMenuItem(value: 'BAKERY', child: Text('Bakery / Restaurant')),
+                    DropdownMenuItem(value: 'RETAIL', child: Text('Retail Store')),
+                    DropdownMenuItem(value: 'DISTRIBUTOR', child: Text('Distributor')),
+                  ],
+                  onChanged: _isAdmin ? (v) => setState(() => _type = v!) : null,
+                ),
+              ),
+            ]),
+            _section('Billing', [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: DropdownButtonFormField<String>(
                   initialValue: _s['defaultPriceOption'] ?? 'base',
                   decoration: InputDecoration(
                     labelText: 'Default Selling Price Option',
@@ -206,19 +220,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               padding: const EdgeInsets.only(bottom: 12),
               child: FilledButton.icon(onPressed: _busy ? null : _save, icon: const Icon(Icons.save), label: const Text('SAVE SETTINGS')),
             ),
+            _section('Offline Data & Backup', const [OfflineDataTiles()]),
             _section('Data & Account', [
-              ListTile(
-                leading: const Icon(Icons.sync),
-                title: const Text('Sync Cloud Data'),
-                subtitle: const Text('Upload offline bills and refresh products'),
-                onTap: () async {
-                  final n = await guard(context, OfflineQueue.flush);
-                  if (n != null && context.mounted) {
-                    await context.read<Catalog>().load();
-                    if (context.mounted) showSnack(context, n > 0 ? '✅ $n offline bill(s) uploaded' : '✅ Everything is up to date!');
-                  }
-                },
-              ),
               ListTile(
                 leading: const Icon(Icons.password),
                 title: const Text('Change password'),

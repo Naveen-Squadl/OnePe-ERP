@@ -5,6 +5,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api.dart';
 import '../models/models.dart';
+import '../services/customer_cache.dart';
+import '../services/local_store.dart';
+import '../services/offline_queue.dart';
+import 'catalog.dart';
 
 /// Auth + tenant context (user, shop, branches, active outlet, plan status).
 class Session extends ChangeNotifier {
@@ -65,6 +69,8 @@ class Session extends ChangeNotifier {
     final valid = branches.any((b) => b.id == activeBranchId);
     if (!valid) activeBranchId = user!.branchId ?? (branches.isNotEmpty ? branches.first.id : null);
     _api.branchId = activeBranchId;
+    OfflineQueue.shopId = shop?.id;
+    OfflineQueue.syncQuietly();
     SharedPreferences.getInstance().then((p) {
       p.setString('session', jsonEncode(res..remove('token')));
       if (activeBranchId != null) p.setString('branchId', activeBranchId!);
@@ -90,6 +96,9 @@ class Session extends ChangeNotifier {
     await prefs.remove('session');
     _api.token = null;
     _api.shopId = null;
+    OfflineQueue.shopId = null;
+    await LocalStore.clear(Catalog.filePrefix); // saved products & customers of this shop
+    await LocalStore.clear(CustomerCache.filePrefix);
     user = null;
     shop = null;
     branches = [];

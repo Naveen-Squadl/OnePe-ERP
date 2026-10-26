@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
@@ -20,6 +21,9 @@ class ApiException implements Exception {
 class Api {
   Api._();
   static final Api instance = Api._();
+
+  /// False after a request could not reach the server; true again on the next answer (see [ping]).
+  static final online = ValueNotifier<bool>(true);
 
   String? token;
   String? branchId;
@@ -44,6 +48,27 @@ class Api {
   Future<dynamic> get(String path, [Map<String, dynamic>? query]) => _send(() => http.get(_uri(path, query), headers: _headers));
   Future<dynamic> post(String path, [Object? body]) =>
       _send(() => http.post(_uri(path), headers: _headers, body: jsonEncode(body ?? {})));
+  /// POST that gives up after [timeout] (checkout: falls back to the offline queue instead of hanging).
+  Future<dynamic> postWithin(Duration timeout, String path, Object? body) =>
+      _send(() => http.post(_uri(path), headers: _headers, body: jsonEncode(body ?? {})), timeout: timeout);
+
+  /// Quick reachability check (any answer from the server counts); updates [online].
+  Future<bool> ping() async {
+    try {
+      await http.get(Uri.parse('${AppConfig.apiUrl}/health')).timeout(const Duration(seconds: 5));
+      online.value = true;
+    } catch (_) {
+      online.value = false;
+    }
+    return online.value;
+  }
+
+  /// POST on behalf of another branch than the active one (offline bills keep the branch they were sold in).
+  Future<dynamic> postForBranch(String? branchId, String path, Object? body) => _send(() => http.post(
+        _uri(path),
+        headers: {..._headers, 'x-branch-id': ?(branchId ?? this.branchId)},
+        body: jsonEncode(body ?? {}),
+      ));
   Future<dynamic> put(String path, [Object? body]) =>
       _send(() => http.put(_uri(path), headers: _headers, body: jsonEncode(body ?? {})));
   Future<dynamic> delete(String path) => _send(() => http.delete(_uri(path), headers: _headers));
@@ -61,21 +86,28 @@ class Api {
     return res['url'] as String;
   }
 
+  /// Small (300 px) version of an uploaded photo for tiles and lists; the server makes it on first request.
+  static String? thumbUrl(String? path) =>
+      path != null && path.startsWith('/uploads/') && !path.endsWith('.thumb.webp') ? mediaUrl('$path.thumb.webp') : mediaUrl(path);
+
   /// Absolute URL for a server-relative media path.
   static String? mediaUrl(String? path) {
     if (path == null || path.isEmpty) return null;
     return path.startsWith('http') ? path : '${AppConfig.apiUrl}$path';
   }
 
-  Future<dynamic> _send(Future<http.Response> Function() call) async {
+  Future<dynamic> _send(Future<http.Response> Function() call, {Duration timeout = const Duration(seconds: 25)}) async {
     http.Response res;
     try {
-      res = await call().timeout(const Duration(seconds: 25));
+      res = await call().timeout(timeout);
     } on TimeoutException {
+      online.value = false;
       throw ApiException(0, 'Slow connection detected. Please check your internet and try again.');
     } catch (_) {
+      online.value = false;
       throw ApiException(0, 'Network error. Please check your internet connection.');
     }
+    online.value = true;
     final body = res.body.isEmpty ? null : jsonDecode(res.body);
     if (res.statusCode >= 200 && res.statusCode < 300) return body;
     if (res.statusCode == 401 && token != null) onUnauthorized?.call();

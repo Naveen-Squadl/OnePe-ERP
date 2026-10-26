@@ -31,7 +31,6 @@ class _PosScreenState extends State<PosScreen> {
   String? _categoryId;
   String _view = 'grid'; // grid | list
   bool _reportsMode = false;
-  int _pending = 0;
   String? _branchLoaded;
 
   @override
@@ -40,7 +39,7 @@ class _PosScreenState extends State<PosScreen> {
     SharedPreferences.getInstance().then((p) {
       if (mounted) setState(() => _view = p.getString('pos_view_mode_pref') ?? 'grid');
     });
-    _refreshPending();
+    WidgetsBinding.instance.addPostFrameCallback((_) => offerBackupFolder(context));
   }
 
   @override
@@ -55,11 +54,6 @@ class _PosScreenState extends State<PosScreen> {
       cart.defaultPriceOption = s.shop?.settings.defaultPriceOption ?? 'base';
       WidgetsBinding.instance.addPostFrameCallback((_) => context.read<Catalog>().load());
     }
-  }
-
-  Future<void> _refreshPending() async {
-    final n = (await OfflineQueue.all()).length;
-    if (mounted) setState(() => _pending = n);
   }
 
   Future<void> _toggleView() async {
@@ -105,7 +99,7 @@ class _PosScreenState extends State<PosScreen> {
   void _openCartPage() => Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => Scaffold(
           backgroundColor: AppColors.bg,
-          body: CartPanel(onCheckedOut: _refreshPending, popOnDone: true),
+          body: CartPanel(popOnDone: true),
         ),
       ));
 
@@ -126,11 +120,7 @@ class _PosScreenState extends State<PosScreen> {
     final session = context.watch<Session>();
     final header = _PosHeader(
       wide: wide,
-      pending: _pending,
-      onSync: () async {
-        await syncCloudData(context);
-        _refreshPending();
-      },
+      onSync: () => syncCloudData(context),
       onWaiting: _openWaitingList,
       search: wide ? _searchField() : null,
     );
@@ -153,7 +143,7 @@ class _PosScreenState extends State<PosScreen> {
               const SizedBox(width: 14),
               SizedBox(
                 width: 372,
-                child: ClipRRect(borderRadius: BorderRadius.circular(26), child: CartPanel(onCheckedOut: _refreshPending)),
+                child: ClipRRect(borderRadius: BorderRadius.circular(26), child: CartPanel()),
               ),
             ]),
           ),
@@ -274,6 +264,30 @@ class _PosScreenState extends State<PosScreen> {
             ),
         ]),
       ),
+      if (catalog.savedAt != null)
+        Padding(
+          padding: EdgeInsets.fromLTRB(hPad, 0, hPad, 8),
+          child: Material(
+            color: AppColors.amber.withValues(alpha: .18),
+            borderRadius: BorderRadius.circular(12),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: catalog.load,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(children: [
+                  const Icon(Icons.cloud_off_rounded, size: 18, color: AppColors.navy),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text('Offline – products & prices saved ${dateTime(catalog.savedAt!)}. Bills sync when back online.',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.navy)),
+                  ),
+                  const Icon(Icons.refresh_rounded, size: 18, color: AppColors.navy),
+                ]),
+              ),
+            ),
+          ),
+        ),
       Expanded(
         child: catalog.loading && catalog.products.isEmpty
             ? const Center(child: CircularProgressIndicator())
@@ -499,11 +513,10 @@ class _NavDest {
 /// the order row (customer / table / new order). Wide: logo-less title row with search and Waiting.
 class _PosHeader extends StatelessWidget {
   final bool wide;
-  final int pending;
   final VoidCallback onSync;
   final VoidCallback onWaiting;
   final Widget? search;
-  const _PosHeader({required this.wide, required this.pending, required this.onSync, required this.onWaiting, this.search});
+  const _PosHeader({required this.wide, required this.onSync, required this.onWaiting, this.search});
 
   static ButtonStyle _glass([double? w]) => IconButton.styleFrom(
         backgroundColor: Colors.white.withValues(alpha: .14),
@@ -536,21 +549,24 @@ class _PosHeader extends StatelessWidget {
             child: title,
           )
         : title;
-    final sync = IconButton(
-      tooltip: pending > 0 ? 'Sync $pending offline bill(s)' : 'Sync Cloud Data',
-      onPressed: onSync,
-      style: _glass(),
-      icon: Badge(
-        isLabelVisible: pending > 0,
-        backgroundColor: AppColors.amber,
-        textColor: AppColors.navy,
-        label: Text('$pending'),
-        child: const Icon(Icons.sync_rounded, size: 21),
+    final sync = ValueListenableBuilder<int>(
+      valueListenable: OfflineQueue.pending,
+      builder: (_, pending, _) => IconButton(
+        tooltip: pending > 0 ? 'Sync $pending offline bill(s)' : 'Sync Cloud Data',
+        onPressed: onSync,
+        style: _glass(),
+        icon: Badge(
+          isLabelVisible: pending > 0,
+          backgroundColor: AppColors.amber,
+          textColor: AppColors.navy,
+          label: Text('$pending'),
+          child: const Icon(Icons.sync_rounded, size: 21),
+        ),
       ),
     );
     final profile = PopupMenuButton<String>(
       tooltip: 'Profile',
-      onSelected: (v) => v == 'logout' ? session.logout() : null,
+      onSelected: (v) => v == 'logout' ? safeLogout(context) : null,
       itemBuilder: (_) => [
         PopupMenuItem(enabled: false, child: Text('${session.user?.name}\n${session.user?.role.replaceAll('_', ' ')}')),
         const PopupMenuItem(value: 'logout', child: Text('Logout')),

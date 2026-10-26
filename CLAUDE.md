@@ -64,7 +64,13 @@ The phone talks to the **API**, never to Postgres directly.
 
 ## Conventions & gotchas
 - Server is authoritative for money: `billing.service.ts` `computeLine/computeTotals`; `app/lib/state/cart.dart` mirrors them for preview only. Change both together.
-- Bills use **client-generated UUIDs**; `POST /bills/checkout` is idempotent (offline replay).
+- Bills use **client-generated UUIDs**; `POST /bills/checkout` is idempotent (offline replay). Offline queue (`services/offline_queue.dart`):
+  auto-sync every 30 s / on resume / after login, pending badge, guarded logout, Android backup files in `Download/OnePe/OfflineBills`
+  (`OfflineBackup.java`, channel `onepe/backup`; folder granted once via SAF → auto recover + clean-up) re-importable from Settings;
+  `/sync/push` marks already-known bills `duplicate`. `Catalog` keeps a per-branch device copy (`LocalStore`) used when offline.
+  Backlog uploads only when idle (`UserActivity`); `Api.online` makes offline checkout instant; `CustomerCache` for offline search.
+- Photos: server resizes uploads (sharp, ≤1024 px) and serves `<photo>.thumb.webp` (300 px) on demand; `ProductImage` shows the
+  thumbnail through the bounded `OfflinePhotos` cache (400 files) – pass `full: true` for the original.
 - **Completed bills are issued tax invoices – never edited or deleted** (API returns 409; `editing: true` is rejected). Only **Cancel**
   (admin/manager, reason required → `Bill.cancelReason`, number kept, stock/balances reverted, optional "load items into a new bill");
   **Restore** of a cancelled bill is shop-admin only. Waiting orders (not billed yet) can be continued (normal Proceed/payment flow) or deleted.

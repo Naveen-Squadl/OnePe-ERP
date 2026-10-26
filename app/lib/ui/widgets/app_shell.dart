@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/config.dart';
 import '../../core/format.dart';
@@ -94,12 +95,62 @@ class BranchSwitcher extends StatelessWidget {
 }
 
 Future<void> syncCloudData(BuildContext context) async {
-  final n = await guard(context, OfflineQueue.flush);
-  if (n == null || !context.mounted) return;
+  final r = await guard(context, OfflineQueue.flush);
+  if (r == null || !context.mounted) return;
   await context.read<Catalog>().load();
-  if (context.mounted) {
-    showSnack(context, n > 0 ? '✅ Sync Complete: $n offline bill(s) uploaded! All data is up to date.' : '✅ Everything is up to date!');
+  if (context.mounted) showSnack(context, '${r.remaining > 0 ? '⚠️' : '✅'} ${r.message}', error: r.remaining > 0);
+}
+
+/// Asks once per install (Android) for the backup folder that protects offline bills; Settings can change it later.
+Future<void> offerBackupFolder(BuildContext context) async {
+  if (!OfflineQueue.hasBackupFolder || OfflineQueue.folderAccess.value != null) return;
+  final prefs = await SharedPreferences.getInstance();
+  if (prefs.getBool('backupFolder.asked') == true) return;
+  await prefs.setBool('backupFolder.asked', true);
+  if (!context.mounted) return;
+  final ok = await confirm(
+    context,
+    'Protect offline bills',
+    'Bills made without internet are also saved in ${OfflineQueue.backupFolder}, so they survive reinstalling the app or clearing its data.\n\n'
+        'Allow OnePe to use that folder: on the next screen tap "Use this folder", then "Allow".',
+    ok: 'Choose folder',
+  );
+  if (ok && context.mounted) await chooseBackupFolder(context);
+}
+
+Future<void> chooseBackupFolder(BuildContext context) async {
+  final folder = await guard(context, OfflineQueue.chooseBackupFolder);
+  if (!context.mounted) return;
+  if (folder == null) return showSnack(context, 'Backup folder not set – you can choose it later in Settings', error: true);
+  final n = OfflineQueue.pending.value;
+  showSnack(context, '✅ Offline bills are backed up in $folder${n > 0 ? ' • $n bill(s) waiting to upload' : ''}');
+}
+
+/// Logout, but first upload offline bills – and warn if some exist only on this device.
+Future<void> safeLogout(BuildContext context) async {
+  final session = context.read<Session>();
+  if (OfflineQueue.pending.value > 0) {
+    try {
+      await OfflineQueue.flush();
+    } catch (_) {
+      // Still offline – warn below.
+    }
+    if (!context.mounted) return;
+    final n = OfflineQueue.pending.value;
+    if (n > 0 &&
+        !await confirm(
+          context,
+          '$n bill(s) not uploaded',
+          'These bills are saved only on this device${OfflineQueue.hasBackupFolder ? ' (backup copy in ${OfflineQueue.backupFolder})' : ''}. '
+              'They upload automatically after the next login once the internet is back.\n\n'
+              'Do NOT clear app data or uninstall the app until they are uploaded.',
+          ok: 'Logout anyway',
+          danger: true,
+        )) {
+      return;
+    }
   }
+  await session.logout();
 }
 
 class AppDrawer extends StatelessWidget {
@@ -172,6 +223,17 @@ class AppDrawer extends StatelessWidget {
                 leading: IconTile(n.icon, n.color, size: 34),
                 title: Text(n.label, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
                 trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                  if (n.path == '#sync')
+                    ValueListenableBuilder<int>(
+                      valueListenable: OfflineQueue.pending,
+                      builder: (_, pending, _) => pending == 0
+                          ? const SizedBox.shrink()
+                          : Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+                              decoration: BoxDecoration(color: AppColors.amber, borderRadius: BorderRadius.circular(8)),
+                              child: Text('$pending', style: const TextStyle(color: AppColors.navy, fontSize: 11, fontWeight: FontWeight.w800)),
+                            ),
+                    ),
                   if (n.path == '/products' && productCount > 0)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
@@ -200,7 +262,7 @@ class AppDrawer extends StatelessWidget {
           ),
           title: Text(s.user?.name ?? '', style: const TextStyle(fontWeight: FontWeight.w700)),
           subtitle: Text(s.user?.role.replaceAll('_', ' ') ?? '', style: const TextStyle(fontSize: 11)),
-          trailing: IconButton(tooltip: 'Logout', onPressed: s.logout, icon: const Icon(Icons.logout, color: AppColors.danger)),
+          trailing: IconButton(tooltip: 'Logout', onPressed: () => safeLogout(context), icon: const Icon(Icons.logout, color: AppColors.danger)),
         ),
         Padding(
           padding: const EdgeInsets.only(bottom: 14, top: 4),

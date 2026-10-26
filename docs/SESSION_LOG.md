@@ -73,6 +73,35 @@ user plugs in a phone with USB debugging, run `adb devices`, `adb reverse tcp:40
   (`Bill.cancelReason`, migration `20261024105019_bill_cancel_reason`), optional "Load items into a new bill" (re-bill).
   **Restore** of a cancelled bill = shop admin only. Waiting orders: Continue (normal Proceed/payment flow) or Delete.
   Backend test lifecycle updated; 5/5 passing; `flutter analyze` clean.
+- **Offline bill safety** (2026-10-26): `OfflineQueue` (offline_queue.dart) now auto-syncs every 30 s while bills are pending,
+  on app resume and after login; entries keep shop, branch and sale time (`billDate`, so the bill gets that day's number).
+  Pending count badge (POS header, drawer "Sync Cloud Data", Settings). Logout first tries to upload, then warns
+  ("Logout anyway"). Android also writes each pending bill to `Download/OnePe/OfflineBills/bill_<id>.json` (native
+  `OfflineBackup.java`, channel `onepe/backup`, MediaStore; WRITE_EXTERNAL_STORAGE only ≤ Android 9) – survives Clear storage
+  and uninstall; **Settings → Import offline bills** (file_picker) re-queues them. `/sync/push` reports bills already on the
+  server as `duplicate: true` (also when cancelled since) and returns the id of rejected bills. Verified with a live
+  Dart run against the API (upload, duplicate re-import, other-shop entry stays queued, rejected bill keeps error) +
+  new backend test; release APK + web build compile. Not yet tried on the N82 (backup file / import flow).
+- **Offline catalog + storage control** (2026-10-26): `Catalog` saves `/products` + `/categories` per branch to
+  `catalog_<branchId>.json` (`LocalStore`: app support folder; web → SharedPreferences) and falls back to it when the API is
+  unreachable (amber "Offline – products & prices saved …" banner on POS, retry every 30 s); cleared on logout.
+  Photos: server caps uploads at 1024 px (sharp) and serves `<photo>.thumb.webp` (300 px, ~14 KB, made on first request –
+  `thumbnails` middleware before `/uploads` static). `ProductImage` uses thumbnails (`full: true` in the photo editor) via
+  `cached_network_image` + `OfflinePhotos` cache (max 400 files, 60 days, prefetched after each catalog load; per-device switch).
+  **Backup folder**: Android 10+ asks once (POS start, `backupFolder.asked`) to grant `Download/OnePe/OfflineBills` via
+  ACTION_OPEN_DOCUMENT_TREE (persisted grant, `OfflineBackup.java` / MainActivity `pickFolder`; Android ≤9 = storage permission).
+  With the grant the app lists the folder at start, re-queues unknown bills and deletes every file once its bill is on the
+  server (incl. files from earlier installs). Settings → **Offline Data & Backup** (`offline_data_tiles.dart`): sync, backup
+  folder, import files, saved products size, photo switch + size + clear. Checked: backend 5/5 (thumbnail test added),
+  temp Dart test of the offline catalog fallback, analyze clean, APK + web build. Not yet run on a device.
+- **Offline behaviour**: `Api.online` flag (false after a network error, ping `/health` every 10 s while offline) →
+  checkout queues instantly when offline, otherwise gives up after 10 s (`Cart.checkoutTimeout`; duplicate-safe by bill id).
+  Old offline bills upload **only when idle** (`UserActivity`: no touch/key for 20 s and empty cart) in batches of 25
+  that stop when the user is active; manual Sync / logout upload everything at once. Photo prefetch also waits for idle.
+  Catalog shows stock minus unsent offline bills and reloads when back online / after an upload.
+  `CustomerCache` (customers_<shop>.json, refreshed ≤ every 10 min) → offline customer search; offline a typed mobile
+  can be used directly (`Customer.phoneOnly`, created on sync). Checked: backend 5/5 (pricing + optional-name tests),
+  temp live Dart test (instant offline checkout, stock deduction, idle gating, customer cache), APK + web build.
 
 ### Environment
 - Mac LAN IP **192.168.0.31**. API `npm run dev` on :4000; web build served by a no-cache python server on :8080.

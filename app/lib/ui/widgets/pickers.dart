@@ -5,6 +5,7 @@ import '../../core/api.dart';
 import '../../core/format.dart';
 import '../../core/theme.dart';
 import '../../models/models.dart';
+import '../../services/customer_cache.dart';
 import '../../state/session.dart';
 import '../screens/customers/customers_screen.dart';
 import 'common.dart';
@@ -26,10 +27,22 @@ class _CustomerPicker extends StatefulWidget {
 
 class _CustomerPickerState extends State<_CustomerPicker> {
   String q = '';
+  bool _offline = false;
   late Future<List<Customer>> future = _load();
 
-  Future<List<Customer>> _load() async =>
-      (await Api.instance.get('/customers', {'q': q}) as List).map((e) => Customer(Map<String, dynamic>.from(e))).toList();
+  /// Server search; offline → the customers saved on this device.
+  Future<List<Customer>> _load() async {
+    try {
+      final list = await Api.instance.get('/customers', {'q': q}) as List;
+      if (q.isEmpty) CustomerCache.save(list);
+      _offline = false;
+      return list.map((e) => Customer(Map<String, dynamic>.from(e))).toList();
+    } on ApiException catch (e) {
+      if (!e.isNetwork) rethrow;
+      _offline = true;
+      return CustomerCache.search(q);
+    }
+  }
 
   bool get _isPhone => RegExp(r'^\d{10}$').hasMatch(q.trim());
 
@@ -70,11 +83,29 @@ class _CustomerPickerState extends State<_CustomerPicker> {
               builder: (c, s) {
                 if (!s.hasData) return const Center(child: CircularProgressIndicator());
                 final canAdd = context.read<Session>().can('customers.manage');
-                // Offer "add" when nothing matches, or a typed mobile isn't an existing customer.
-                final showAdd = canAdd && (s.data!.isEmpty || (_isPhone && !s.data!.any((c) => c.phone == q.trim())));
+                final unknownPhone = _isPhone && !s.data!.any((c) => c.phone == q.trim());
+                // Offer "add" when nothing matches, or a typed mobile isn't an existing customer (online only).
+                final showAdd = canAdd && !_offline && (s.data!.isEmpty || unknownPhone);
                 final addLabel = _isPhone ? 'Add new customer with ${q.trim()}' : (q.trim().isEmpty ? 'Add new customer' : 'Add "${q.trim()}" as new customer');
-                if (s.data!.isEmpty && !showAdd) return const EmptyState(icon: Icons.person_search, title: 'No customers match your search.');
+                if (s.data!.isEmpty && !showAdd && !(_offline && unknownPhone)) {
+                  return EmptyState(icon: Icons.person_search, title: _offline ? 'Offline – no saved customer matches.' : 'No customers match your search.');
+                }
                 return ListView(children: [
+                  if (_offline)
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      child: Text('Offline – showing customers saved on this device (balances as of last sync).',
+                          style: TextStyle(fontSize: 12, color: AppColors.muted, fontWeight: FontWeight.w600)),
+                    ),
+                  if (_offline && unknownPhone) ...[
+                    ListTile(
+                      leading: const CircleAvatar(backgroundColor: AppColors.green, foregroundColor: Colors.white, child: Icon(Icons.phone_android)),
+                      title: Text('Use ${q.trim()} for this bill', style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.green)),
+                      subtitle: const Text('Customer is created when the bill syncs'),
+                      onTap: () => Navigator.pop(context, Customer.phoneOnly(q.trim())),
+                    ),
+                    const Divider(height: 1),
+                  ],
                   if (showAdd) ...[
                     _addTile(addLabel),
                     const Divider(height: 1),

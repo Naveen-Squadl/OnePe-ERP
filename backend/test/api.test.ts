@@ -165,6 +165,22 @@ test('waiting bills, walk-in validation, expense vouchers, reports', async () =>
   assert.equal(summary.netCollection, 240); // 100 + 40 received on sales + 115 customer payment − 15 expense
   const matrix = (await api('/reports/sales-matrix?preset=today', admin)).json;
   assert.ok(matrix.items.some((i: any) => i.name === 'Tea' && i.qty === 2));
+
+  // Offline bills: pushed with their sale date; re-pushing (lost reply / re-imported backup file) is a no-op,
+  // also after the bill was cancelled. Invalid bills report their id.
+  const yesterday = new Date(Date.now() - 86_400_000);
+  const offline = { id: randomUUID(), billDate: yesterday.toISOString(), items: [{ productId: prod.id, quantity: 1 }], receivedAmount: 20 };
+  const bad = { id: randomUUID(), items: [] };
+  const push = (await api('/sync/push', admin, { body: { bills: [offline, bad] } })).json;
+  assert.equal(push.results[0].ok, true);
+  assert.equal(push.results[0].duplicate, undefined);
+  assert.ok(push.results[0].billNo.includes(yesterday.toISOString().slice(0, 10).replaceAll('-', '')), push.results[0].billNo);
+  assert.deepEqual([push.results[1].id, push.results[1].ok], [bad.id, false]);
+  await api(`/bills/${offline.id}/cancel`, admin, { body: { reason: 'Test' } });
+  const again = (await api('/sync/push', admin, { body: { bills: [offline] } })).json;
+  assert.deepEqual([again.results[0].ok, again.results[0].duplicate, again.results[0].billNo], [true, true, push.results[0].billNo]);
+  assert.equal((await api(`/products/${prod.id}`, admin)).json.stock, 98);
+
 });
 
 test('purchases inward stock & supplier balance; returns; permissions', async () => {
@@ -213,6 +229,14 @@ test('product photo upload is stored and served', async () => {
   const img = await fetch(`${base}${url}`);
   assert.equal(img.status, 200);
   assert.equal(img.headers.get('cross-origin-resource-policy'), 'cross-origin');
+  // Tile thumbnail is generated on first request, then served as a file.
+  for (let i = 0; i < 2; i++) {
+    const thumb = await fetch(`${base}${url}.thumb.webp`);
+    assert.equal(thumb.status, 200);
+    assert.equal(thumb.headers.get('content-type'), 'image/webp');
+  }
+  assert.equal((await fetch(`${base}${url.replace('.png', '-missing.png')}.thumb.webp`)).status, 404);
+  assert.equal((await fetch(`${base}/uploads/..%2F..%2Fpackage.json.thumb.webp`)).status, 404);
   const prod = await api('/products', admin, { body: { name: 'Photo Cake', basePrice: 10, imageUrl: url } });
   assert.equal(prod.json.imageUrl, url);
   const bad = new FormData();

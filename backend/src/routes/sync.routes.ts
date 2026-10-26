@@ -1,3 +1,4 @@
+import { BillStatus } from '@prisma/client';
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
@@ -31,19 +32,29 @@ syncRouter.get('/pull', async (req, res) => {
   res.json({ serverTime, shop, branches, categories, products, customers, bills });
 });
 
-/** Push bills created while offline. Idempotent per bill id; returns per-bill result. */
+/**
+ * Push bills created while offline. Idempotent per bill id; returns per-bill result.
+ * A bill that is already on the server (re-sent after a sync whose reply was lost, or re-imported from a
+ * device backup file) counts as ok with `duplicate: true` – including one that was cancelled meanwhile.
+ */
 syncRouter.post('/push', requirePermission('bills.create'), async (req, res) => {
   const { bills } = parse(z.object({ bills: z.array(z.unknown()).max(500) }), req.body);
   const shopId = shopIdOf(req);
   const branchId = await branchIdOf(req);
-  const results: { id?: string; ok: boolean; billNo?: string; error?: string }[] = [];
+  const results: { id?: string; ok: boolean; billNo?: string; duplicate?: boolean; error?: string }[] = [];
   for (const raw of bills) {
     const r = CheckoutSchema.safeParse(raw);
     if (!r.success) {
-      results.push({ ok: false, error: r.error.issues[0]?.message });
+      const id = (raw as { id?: unknown } | null)?.id;
+      results.push({ id: typeof id === 'string' ? id : undefined, ok: false, error: r.error.issues[0]?.message });
       continue;
     }
     try {
+      const existing = await prisma.bill.findUnique({ where: { id: r.data.id }, select: { shopId: true, billNo: true, status: true } });
+      if (existing && existing.shopId === shopId && existing.status !== BillStatus.WAITING) {
+        results.push({ id: r.data.id, ok: true, billNo: existing.billNo, duplicate: true });
+        continue;
+      }
       const b = await checkout(req.user!, shopId, branchId, r.data);
       results.push({ id: b.id, ok: true, billNo: b.billNo });
     } catch (e) {

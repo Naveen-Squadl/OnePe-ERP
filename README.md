@@ -79,7 +79,7 @@ cd app && flutter analyze
 | Roles | Super Admin, Admin, Manager, Cashier, Salesman, Biller, Store Keeper, Stock Manager with a permission matrix enforced by the API and the menu |
 | POS | category chips, search, barcode/QR scan, list/2-col/3-col views, variable price items, base/last/max/custom price, item & bill discounts (flat/%), loyalty redeem, tables, hold/waiting list, KOT, expense vouchers, cash/UPI(QR)/card/credit, change vs. account credit, auto-create customer by mobile |
 | Bills history | waiting/completed tabs, search, date filter, edit (reverts & re-applies stock/balances), cancel, soft delete, restore, permanent delete, print, WhatsApp, PDF export |
-| Offline | bills checked out while offline are queued with a client UUID and pushed idempotently (`/sync/push`) |
+| Offline | bills checked out while offline are queued with a client UUID, auto-synced idempotently (`/sync/push`), and on Android backed up to `Download/OnePe/OfflineBills` (folder granted once → automatic recovery/clean-up); products/categories and photo thumbnails are kept on the device for offline billing |
 | Products & categories | **product photos** (camera / gallery upload, shown on POS cards & lists), barcode auto-generate + label printing, per-branch availability & price, barcode, HSN, GST (CGST/SGST/IGST), stock/expense categories, opening stock with batch & expiry, archive-on-delete, bulk import endpoint |
 | Customers | ledger with opening/running/closing balance, payments with receipts, purchase history, recalculate balances, loyalty points |
 | Suppliers & purchases | supplier payables, purchase bills, purchase orders → inward, batches & expiry, margin hints |

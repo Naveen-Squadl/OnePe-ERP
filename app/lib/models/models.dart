@@ -120,6 +120,10 @@ class Product {
 class Customer {
   final Json raw;
   Customer(this.raw);
+
+  /// Mobile number picked while offline – not on the server yet; the bill creates it when it syncs.
+  Customer.phoneOnly(String phone) : raw = {'phone': phone};
+  bool get isNew => raw['id'] == null;
   String get id => raw['id'];
   String get name => raw['name'];
   String? get phone => raw['phone'];
