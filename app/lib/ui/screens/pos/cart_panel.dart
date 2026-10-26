@@ -133,7 +133,7 @@ class _OrderContextRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bg = onCard ? Colors.white : AppColors.bg;
-    final name = cart.customer?.name ?? (cart.customerPhone != null ? 'New Customer (${cart.customerPhone})' : 'Walk-in');
+    final name = cart.customer?.name ?? (cart.customerPhone != null ? (cart.customerName ?? cart.customerPhone!) : 'Walk-in');
     final sub = cart.customer != null
         ? 'Balance ${money(cart.customer!.balance)}${cart.customer!.loyaltyPoints > 0 ? ' · ★ ${cart.customer!.loyaltyPoints.toStringAsFixed(0)}' : ''} · Change'
         : 'Search / Add customer';
@@ -206,39 +206,22 @@ class _ExpenseDateRow extends StatelessWidget {
       );
 }
 
-/// Cart line: name + line total, price option dropdown, qty stepper, "Add Discount".
+/// Cart line: name + line total, item price, qty stepper, "Add Discount".
 class _LineCard extends StatelessWidget {
   final CartLine line;
   final bool onCard;
   const _LineCard({required this.line, this.onCard = false});
 
-  Future<void> _onPriceOption(BuildContext context, String v) async {
+  Future<void> _enterPrice(BuildContext context) async {
     final cart = context.read<Cart>();
-    switch (v) {
-      case 'base':
-        cart.setPrice(line, line.basePrice, 'base');
-      case 'max':
-        cart.setPrice(line, line.maxPrice!, 'max');
-      case 'last':
-        cart.setPrice(line, line.price, 'last'); // server resolves the customer's last price
-        showSnack(context, 'Last price will be applied at checkout');
-      case 'custom':
-        final p = await askNumber(context, 'Enter Price for ${line.name}', label: 'Price (₹)', initial: line.price);
-        if (p != null) cart.setPrice(line, p, 'custom');
-    }
+    final p = await askNumber(context, 'Enter Price for ${line.name}', label: 'Price (₹)', initial: line.price);
+    if (p != null) cart.setPrice(line, p);
   }
 
   @override
   Widget build(BuildContext context) {
     final cart = context.read<Cart>();
     final t = line.compute(cart.gstInclusive);
-    final options = <String, String>{
-      'base': 'Basic: ${money(line.basePrice).replaceAll('.00', '')}',
-      if (line.maxPrice != null) 'max': 'Max: ${money(line.maxPrice).replaceAll('.00', '')}',
-      if (cart.customer != null) 'last': 'Last price',
-      'custom': line.priceType == 'custom' ? 'Custom: ${money(line.price).replaceAll('.00', '')}' : 'Custom / Edit',
-    };
-    final current = options.containsKey(line.priceType) ? line.priceType : 'custom';
     final fieldBg = onCard ? AppColors.bg : Colors.white;
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 10, 8),
@@ -250,19 +233,22 @@ class _LineCard extends StatelessWidget {
         ]),
         const SizedBox(height: 8),
         Row(children: [
+          // Item price from Products (admin); only variable-price / expense lines can be changed here.
           Expanded(
-            child: Container(
-              height: 38,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              decoration: BoxDecoration(color: fieldBg, borderRadius: BorderRadius.circular(12)),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: current,
-                  isExpanded: true,
-                  style: const TextStyle(fontFamily: AppTheme.font, fontSize: 13, color: AppColors.text, fontWeight: FontWeight.w600),
-                  items: [for (final e in options.entries) DropdownMenuItem(value: e.key, child: Text(e.value, overflow: TextOverflow.ellipsis))],
-                  onChanged: (v) => v == null ? null : _onPriceOption(context, v),
-                ),
+            child: InkWell(
+              onTap: line.priceEditable ? () => _enterPrice(context) : null,
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                height: 38,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(color: fieldBg, borderRadius: BorderRadius.circular(12)),
+                child: Row(children: [
+                  Expanded(
+                    child: Text('Price: ${money(line.price).replaceAll('.00', '')}',
+                        overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, color: AppColors.text, fontWeight: FontWeight.w600)),
+                  ),
+                  if (line.priceEditable) const Icon(Icons.edit_rounded, size: 16, color: AppColors.blue),
+                ]),
               ),
             ),
           ),

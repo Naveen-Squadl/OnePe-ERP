@@ -63,6 +63,8 @@ The phone talks to the **API**, never to Postgres directly.
 - Release APK runs on the user's Nexgo N82 (2026-10-24); iOS not yet built. Release builds need `isMinifyEnabled = false` (Nexgo SDK).
 
 ## Conventions & gotchas
+- **Price = item price** (admin sets it in Products); the counter only gives discounts. Entered prices only for variable-price
+  products, expense items, ad-hoc lines and offline bills (logged if different). Customer name is optional everywhere.
 - Server is authoritative for money: `billing.service.ts` `computeLine/computeTotals`; `app/lib/state/cart.dart` mirrors them for preview only. Change both together.
 - Bills use **client-generated UUIDs**; `POST /bills/checkout` is idempotent (offline replay). Offline queue (`services/offline_queue.dart`):
   auto-sync every 30 s / on resume / after login, pending badge, guarded logout, Android backup files in `Download/OnePe/OfflineBills`

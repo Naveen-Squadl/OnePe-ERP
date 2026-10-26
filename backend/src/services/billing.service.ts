@@ -27,6 +27,7 @@ export const CheckoutSchema = z.object({
         productName: z.string().trim().nullish(),
         quantity: z.coerce.number().positive(),
         soldPrice: z.coerce.number().min(0).nullish(),
+        /** Legacy 'last' / 'max' are accepted but ignored – the price is always the item price (see priceItems). */
         priceType: z.enum(['base', 'last', 'max', 'custom', 'branch']).default('base'),
         discount: z.coerce.number().min(0).default(0),
         note: z.string().nullish(),
@@ -111,13 +112,20 @@ export function computeTotals(
   return { subtotal, totalGst, itemDiscount, discount: round2(discount), loyaltyRedeem: round2(redeem), roundOff, total };
 }
 
+/**
+ * Line prices are always the item price (branch price, else base price) that the admin sets in Products –
+ * the counter can only give discounts. The entered price is used only for variable-price products (enabled
+ * per product by the admin), ad-hoc lines / expense vouchers, and offline bills ([offline]): those keep the
+ * price printed on the receipt; a difference from the current item price is added to [priceChanges].
+ */
 async function priceItems(
   tx: Tx,
   shopId: string,
   branchId: string,
-  customerId: string | null,
   input: CheckoutInput,
   settings: ShopSettings,
+  offline: boolean,
+  priceChanges: string[],
 ): Promise<PricedItem[]> {
   const ids = input.items.map((i) => i.productId).filter((x): x is string => !!x);
   const products = await tx.product.findMany({
@@ -125,14 +133,6 @@ async function priceItems(
     include: { branches: { where: { branchId } } },
   });
   const byId = new Map(products.map((p) => [p.id, p]));
-  const lastPrices = customerId
-    ? new Map(
-        (await tx.customerPrice.findMany({ where: { customerId, productId: { in: ids } } })).map((c) => [
-          c.productId,
-          num(c.lastPrice),
-        ]),
-      )
-    : new Map<string, number>();
 
   return input.items.map((i) => {
     const p = i.productId ? byId.get(i.productId) : undefined;
@@ -143,20 +143,11 @@ async function priceItems(
     }
     const branchPrice = p?.branches[0]?.price != null ? num(p.branches[0].price) : null;
     const original = branchPrice ?? (p ? num(p.basePrice) : num(i.soldPrice));
-    let sold: number;
-    switch (i.priceType) {
-      case 'max':
-        sold = p?.maxPrice != null ? num(p.maxPrice) : original;
-        break;
-      case 'last':
-        sold = (p && lastPrices.get(p.id)) ?? original;
-        break;
-      case 'custom':
-        if (i.soldPrice == null) throw badRequest(`Enter price for ${p?.name ?? i.productName}`);
-        sold = i.soldPrice;
-        break;
-      default:
-        sold = i.soldPrice ?? original;
+    if (i.priceType === 'custom' && i.soldPrice == null) throw badRequest(`Enter price for ${p?.name ?? i.productName}`);
+    const entered = !p || p.isPriceVariable || input.kind === BillKind.EXPENSE;
+    const sold = (entered || offline) && i.soldPrice != null ? i.soldPrice : original;
+    if (offline && !entered && round2(sold) !== round2(original)) {
+      priceChanges.push(`${p!.name} sold at ₹${round2(sold)} (item price now ₹${round2(original)})`);
     }
     const gstPercent = input.kind === BillKind.EXPENSE ? 0 : p ? num(p.gstPercent) : 0;
     const line = computeLine(i.quantity, sold, i.discount, gstPercent, settings.gstInclusive);
@@ -168,7 +159,7 @@ async function priceItems(
       quantity: round3(i.quantity),
       originalPrice: original,
       soldPrice: round2(sold),
-      priceType: i.priceType,
+      priceType: sold === original ? (branchPrice != null ? 'branch' : 'base') : 'custom',
       discount: round2(i.discount),
       gstPercent,
       isIgst: p?.isIgst ?? false,
@@ -272,13 +263,20 @@ async function resolveCustomer(tx: Tx, shopId: string, input: CheckoutInput) {
     const existing = await tx.customer.findFirst({ where: { shopId, phone: input.customerPhone } });
     if (existing) return existing;
     return tx.customer.create({
-      data: { shopId, phone: input.customerPhone, name: input.customerName?.trim() || 'New Customer' },
+      data: { shopId, phone: input.customerPhone, name: input.customerName?.trim() ?? '' },
     });
   }
   return null;
 }
 
-export async function checkout(user: AuthUser, shopId: string, branchId: string, input: CheckoutInput): Promise<BillWithItems> {
+/** [opts.offline]: bill sold while the device was offline (`/sync/push`) – keeps the receipt's prices. */
+export async function checkout(
+  user: AuthUser,
+  shopId: string,
+  branchId: string,
+  input: CheckoutInput,
+  opts: { offline?: boolean } = {},
+): Promise<BillWithItems> {
   return prisma.$transaction(
     async (tx) => {
       const shop = await tx.shop.findUniqueOrThrow({ where: { id: shopId } });
@@ -310,7 +308,8 @@ export async function checkout(user: AuthUser, shopId: string, branchId: string,
         if (input.kind === BillKind.EXPENSE && hasSale) throw badRequest('Cannot mix sales items with an expense voucher.');
       }
 
-      const lines = await priceItems(tx, shopId, branchId, customer?.id ?? null, input, settings);
+      const priceChanges: string[] = [];
+      const lines = await priceItems(tx, shopId, branchId, input, settings, opts.offline ?? false, priceChanges);
 
       const availablePoints = customer ? num(customer.loyaltyPoints) : 0;
       const redeemReq = settings.enableLoyaltyPoints ? Math.min(input.loyaltyPointsToRedeem, availablePoints) : 0;
@@ -337,7 +336,7 @@ export async function checkout(user: AuthUser, shopId: string, branchId: string,
         status: input.status,
         tableName: input.tableName ?? null,
         customerId: customer?.id ?? null,
-        customerName: customer?.name ?? input.customerName ?? null,
+        customerName: (customer ? customer.name : input.customerName) || null,
         customerContact: customer?.phone ?? input.customerPhone ?? null,
         subtotal: totals.subtotal,
         totalGst: totals.totalGst,
@@ -367,6 +366,9 @@ export async function checkout(user: AuthUser, shopId: string, branchId: string,
 
       if (bill.status === BillStatus.COMPLETED) {
         await applyEffects(tx, bill, user, settings, 'Bill: ');
+      }
+      if (priceChanges.length) {
+        await logActivity(user, 'offline_price_difference', `Offline bill ${bill.billNo}: ${priceChanges.join('; ')}`, { billId: bill.id }, tx, shopId);
       }
       return tx.bill.findUniqueOrThrow({ where: { id: bill.id }, include: billInclude });
     },

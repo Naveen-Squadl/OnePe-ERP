@@ -181,7 +181,7 @@ Future<bool> editCustomer(BuildContext context, [Customer? c]) async => await cu
 /// Returns the saved customer, or null if cancelled or failed.
 Future<Customer?> customerForm(BuildContext context, {Customer? c, String? name, String? phone}) async {
   final r = await showFormDialog(context, title: c == null ? 'Add Customer' : 'Edit Customer', fields: [
-    FieldSpec('name', 'Customer Name', initial: c?.name ?? name, required: true),
+    FieldSpec('name', 'Customer Name (optional)', initial: c?.savedName ?? name),
     FieldSpec('phone', 'Mobile Number', initial: c?.phone ?? phone, keyboard: TextInputType.phone, validator: (v) => v.isEmpty || RegExp(r'^\d{10}$').hasMatch(v) ? null : 'Must be 10 digits'),
     FieldSpec('address', 'Address', initial: c?.address),
     FieldSpec('gstin', 'GSTIN', initial: c?.gstin),

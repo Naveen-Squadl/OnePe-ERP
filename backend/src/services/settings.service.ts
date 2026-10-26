@@ -19,7 +19,6 @@ export const ShopSettingsSchema = z.object({
   enableLoyaltyPoints: z.boolean().default(false),
   /** Rupees spent per 1 loyalty point earned. 1 point = ₹1 when redeemed. */
   loyaltyPointsRatio: z.number().positive().default(100),
-  defaultPriceOption: z.enum(['base', 'last', 'max']).default('base'),
   enableFastPay: z.boolean().default(true),
   whatsappCustomerShare: z.boolean().default(false),
   whatsappDailyReport: z.boolean().default(false),

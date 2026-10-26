@@ -12,10 +12,12 @@ class CartLine {
   final String name;
   final double gstPercent;
   final double basePrice;
-  final double? maxPrice;
+  /// Only variable-price products, expense items and ad-hoc lines take an entered price; everything else
+  /// is sold at the item price set by the admin (the counter can only give discounts).
+  final bool priceEditable;
   double quantity;
   double price;
-  String priceType; // base | last | max | custom
+  String priceType; // base | custom
   double discount;
   String? note;
   double kotPrinted;
@@ -25,7 +27,7 @@ class CartLine {
     required this.name,
     required this.gstPercent,
     required this.basePrice,
-    this.maxPrice,
+    this.priceEditable = false,
     this.quantity = 1,
     required this.price,
     this.priceType = 'base',
@@ -34,18 +36,14 @@ class CartLine {
     this.kotPrinted = 0,
   });
 
-  factory CartLine.fromProduct(Product p, {String priceOption = 'base'}) {
-    final usesMax = priceOption == 'max' && p.maxPrice != null;
-    return CartLine(
-      productId: p.id,
-      name: p.name,
-      gstPercent: p.gstPercent,
-      basePrice: p.price,
-      maxPrice: p.maxPrice,
-      price: usesMax ? p.maxPrice! : p.price,
-      priceType: usesMax ? 'max' : (priceOption == 'last' ? 'last' : 'base'),
-    );
-  }
+  factory CartLine.fromProduct(Product p) => CartLine(
+        productId: p.id,
+        name: p.name,
+        gstPercent: p.gstPercent,
+        basePrice: p.price,
+        price: p.price,
+        priceEditable: p.isPriceVariable || p.isExpense,
+      );
 
   /// Mirrors billing.service computeLine on the server.
   ({double taxable, double gst, double total}) compute(bool gstInclusive) {
@@ -90,7 +88,6 @@ class Cart extends ChangeNotifier {
   String? note;
   DateTime? billDate;
   bool gstInclusive = false;
-  String defaultPriceOption = 'base';
 
   /// Set when a waiting bill or completed bill is loaded.
   String? billId;
@@ -141,7 +138,7 @@ class Cart extends ChangeNotifier {
     if (existing != null) {
       existing.quantity += qty;
     } else {
-      final line = CartLine.fromProduct(p, priceOption: defaultPriceOption)..quantity = qty;
+      final line = CartLine.fromProduct(p)..quantity = qty;
       if (price != null) {
         line.price = price;
         line.priceType = priceType ?? 'custom';
@@ -161,9 +158,11 @@ class Cart extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setPrice(CartLine l, double price, String type) {
+  /// Entered price for variable-price / expense / ad-hoc lines (ignored by the server for other items).
+  void setPrice(CartLine l, double price) {
+    if (!l.priceEditable) return;
     l.price = price;
-    l.priceType = type;
+    l.priceType = 'custom';
     notifyListeners();
   }
 
@@ -176,7 +175,7 @@ class Cart extends ChangeNotifier {
   void setCustomer(Customer? c, {String? phone, String? name}) {
     customer = c != null && c.isNew ? null : c;
     customerPhone = c?.phone ?? phone;
-    customerName = c?.name ?? name;
+    customerName = c?.savedName ?? name;
     loyaltyRedeem = 0;
     if (!hasCustomer) onCredit = false;
     notifyListeners();
@@ -252,14 +251,17 @@ class Cart extends ChangeNotifier {
       discountValue = b.discount;
     }
     for (final i in b.items) {
+      // Entered prices stay; other items go back to the item price (the server applies the current one).
+      final entered = i.productId == null || i.priceType == 'custom';
       lines.add(CartLine(
         productId: i.productId,
         name: i.productName,
         gstPercent: i.gstPercent,
         basePrice: i.originalPrice,
+        priceEditable: entered,
         quantity: i.quantity,
-        price: i.soldPrice,
-        priceType: i.priceType == 'last' ? 'custom' : i.priceType,
+        price: entered ? i.soldPrice : i.originalPrice,
+        priceType: entered ? 'custom' : 'base',
         discount: i.discount,
         note: i.note,
         kotPrinted: asNew ? 0 : i.kotPrintedQuantity,

@@ -55,7 +55,7 @@ syncRouter.post('/push', requirePermission('bills.create'), async (req, res) => 
         results.push({ id: r.data.id, ok: true, billNo: existing.billNo, duplicate: true });
         continue;
       }
-      const b = await checkout(req.user!, shopId, branchId, r.data);
+      const b = await checkout(req.user!, shopId, branchId, r.data, { offline: true });
       results.push({ id: b.id, ok: true, billNo: b.billNo });
     } catch (e) {
       results.push({ id: r.data.id, ok: false, error: (e as Error).message });

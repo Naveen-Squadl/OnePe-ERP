@@ -51,7 +51,6 @@ class _PosScreenState extends State<PosScreen> {
       _branchLoaded = s.activeBranchId;
       final cart = context.read<Cart>();
       cart.gstInclusive = s.shop?.settings.gstInclusive ?? false;
-      cart.defaultPriceOption = s.shop?.settings.defaultPriceOption ?? 'base';
       WidgetsBinding.instance.addPostFrameCallback((_) => context.read<Catalog>().load());
     }
   }
@@ -612,7 +611,7 @@ class _PosHeader extends StatelessWidget {
       );
     }
 
-    final customerName = cart.customer?.name ?? (cart.customerPhone?.length == 10 ? (cart.customerName ?? 'New Customer') : 'Walk-in');
+    final customerName = cart.customer?.name ?? (cart.customerPhone?.length == 10 ? (cart.customerName ?? cart.customerPhone!) : 'Walk-in');
     return _LimeStep(
       radius: 28,
       top: false,

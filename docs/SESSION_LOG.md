@@ -94,6 +94,14 @@ user plugs in a phone with USB debugging, run `adb devices`, `adb reverse tcp:40
   server (incl. files from earlier installs). Settings → **Offline Data & Backup** (`offline_data_tiles.dart`): sync, backup
   folder, import files, saved products size, photo switch + size + clear. Checked: backend 5/5 (thumbnail test added),
   temp Dart test of the offline catalog fallback, analyze clean, APK + web build. Not yet run on a device.
+- **Pricing rule (user decision)**: the line price is always the item price (branch price, else base) set by the admin in
+  Products; the counter can only give discounts. Removed the cart price picker (Base/Last/Max/Custom) and the
+  "Default Selling Price Option" setting. Entered prices only for variable-price products, expense items and ad-hoc lines;
+  server enforces it in `priceItems` (legacy 'last'/'max' accepted but ignored). Offline bills (`/sync/push`,
+  `checkout(..., {offline: true})`) keep the receipt price; a difference from the current item price is logged as
+  activity `offline_price_difference`.
+- **Customer name optional** (all shop types): API needs a mobile or a name; quick capture no longer stores
+  "New Customer"; app shows the mobile when there is no name (`Customer.name` fallback, `savedName` for forms).
 - **Offline behaviour**: `Api.online` flag (false after a network error, ping `/health` every 10 s while offline) →
   checkout queues instantly when offline, otherwise gives up after 10 s (`Cart.checkoutTimeout`; duplicate-safe by bill id).
   Old offline bills upload **only when idle** (`UserActivity`: no touch/key for 20 s and empty cart) in batches of 25

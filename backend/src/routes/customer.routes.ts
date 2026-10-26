@@ -4,7 +4,7 @@ import { PaymentMethod, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { parse, optStr } from '../lib/validate';
 import { branchIdOf, requirePermission, shopIdOf } from '../middleware/auth';
-import { notFound } from '../lib/errors';
+import { badRequest, notFound } from '../lib/errors';
 import { nextSequence, yymmdd } from '../lib/sequence';
 import { customerLedger, recalculateCustomerBalance } from '../services/ledger.service';
 import { logActivity } from '../lib/activity';
@@ -39,8 +39,11 @@ customerRouter.get('/:id', async (req, res) => {
   res.json(await own(req));
 });
 
+const customerLabel = (c: { name: string; phone: string | null }) => c.name || c.phone || 'customer';
+
 const Body = z.object({
-  name: z.string().trim().min(1),
+  /** Optional for every shop type – a customer can be just a mobile number. */
+  name: z.string().trim().default(''),
   phone: z.string().trim().regex(/^\d{10}$/, 'Must be 10 digits').nullish(),
   address: optStr,
   gstin: optStr,
@@ -49,6 +52,7 @@ const Body = z.object({
 
 customerRouter.post('/', requirePermission('customers.manage'), async (req, res) => {
   const body = parse(Body, req.body);
+  if (!body.name && !body.phone) throw badRequest('Enter a mobile number or a name');
   const c = await prisma.customer.create({ data: { ...body, shopId: shopIdOf(req), currentBalance: body.openingBalance } });
   res.status(201).json(c);
 });
@@ -64,7 +68,7 @@ customerRouter.put('/:id', requirePermission('customers.manage'), async (req, re
 customerRouter.delete('/:id', requirePermission('customers.manage'), async (req, res) => {
   const c = await own(req);
   await prisma.customer.delete({ where: { id: c.id } });
-  await logActivity(req.user!, 'customer_deleted', `Deleted customer ${c.name}`);
+  await logActivity(req.user!, 'customer_deleted', `Deleted customer ${customerLabel(c)}`);
   res.json({ ok: true });
 });
 
@@ -97,7 +101,7 @@ customerRouter.post('/:id/payments', requirePermission('customers.manage', 'bill
     const customer = await tx.customer.update({ where: { id: c.id }, data: { currentBalance: { decrement: body.amount } } });
     return { payment, customer, openingBalance: Number(c.currentBalance) };
   });
-  await logActivity(req.user!, 'payment_received', `Payment of ₹${body.amount} recorded via ${body.method} for ${c.name}`);
+  await logActivity(req.user!, 'payment_received', `Payment of ₹${body.amount} recorded via ${body.method} for ${customerLabel(c)}`);
   res.status(201).json(result);
 });
 

@@ -47,7 +47,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'logoUrl': _logo,
       if (_isAdmin) 'upiId': _upi.text.trim().isEmpty ? null : _upi.text.trim(),
       if (_isAdmin) 'shopType': _type,
-      'settings': Map<String, dynamic>.from(_s)..removeWhere((k, _) => !_isAdmin && (k == 'printerType' || k == 'defaultPriceOption')),
+      'settings': Map<String, dynamic>.from(_s)..removeWhere((k, _) => !_isAdmin && k == 'printerType'),
     };
     final r = await guard(context, () => Api.instance.put('/shop', body), success: 'Settings saved');
     if (r != null && mounted) await context.read<Session>().refresh();
@@ -136,37 +136,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ]),
             _section('Billing', [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                child: DropdownButtonFormField<String>(
-                  initialValue: _type,
-                  decoration: InputDecoration(labelText: 'Shop Type', helperText: _isAdmin ? 'Changing this adjusts the POS interface' : 'Only Admins can change Shop Type'),
-                  items: const [
-                    DropdownMenuItem(value: 'BAKERY', child: Text('Bakery / Restaurant')),
-                    DropdownMenuItem(value: 'RETAIL', child: Text('Retail Store')),
-                    DropdownMenuItem(value: 'DISTRIBUTOR', child: Text('Distributor')),
-                  ],
-                  onChanged: _isAdmin ? (v) => setState(() => _type = v!) : null,
-                ),
-              ),
-            ]),
-            _section('Billing', [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                child: DropdownButtonFormField<String>(
-                  initialValue: _s['defaultPriceOption'] ?? 'base',
-                  decoration: InputDecoration(
-                    labelText: 'Default Selling Price Option',
-                    helperText: _isAdmin ? 'Applied when items are added to the cart' : 'Only Admins can change Default Price Option',
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: 'base', child: Text('Base price')),
-                    DropdownMenuItem(value: 'last', child: Text('Last price paid by customer')),
-                    DropdownMenuItem(value: 'max', child: Text('Max price / MRP')),
-                  ],
-                  onChanged: _isAdmin ? (v) => setState(() => _s['defaultPriceOption'] = v) : null,
-                ),
-              ),
               _switch('gstInclusive', 'Prices include GST', subtitle: 'Off: GST is added on top of the item price'),
               _switch('enableLoyaltyPoints', 'Enable loyalty points'),
               if (_s['enableLoyaltyPoints'] == true)

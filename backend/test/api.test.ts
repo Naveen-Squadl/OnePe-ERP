@@ -181,6 +181,29 @@ test('waiting bills, walk-in validation, expense vouchers, reports', async () =>
   assert.deepEqual([again.results[0].ok, again.results[0].duplicate, again.results[0].billNo], [true, true, push.results[0].billNo]);
   assert.equal((await api(`/products/${prod.id}`, admin)).json.stock, 98);
 
+  // Prices: always the item price – a price sent by the counter (or a legacy 'last' / 'max' option) is ignored;
+  // variable-price products take the entered price; an offline bill keeps its receipt price and is logged.
+  const loose = (await api('/products', admin, { body: { name: 'Loose Sweets', basePrice: 1, isPriceVariable: true, trackStock: false } })).json;
+  const priced = await api('/bills/checkout', admin, {
+    body: { id: randomUUID(), items: [{ productId: prod.id, quantity: 1, soldPrice: 5, priceType: 'custom' }, { productId: prod.id, quantity: 1, priceType: 'last' }, { productId: loose.id, quantity: 1, soldPrice: 75, priceType: 'custom' }] },
+  });
+  assert.equal(priced.status, 201, JSON.stringify(priced.json));
+  assert.deepEqual(priced.json.items.map((i: any) => i.soldPrice).sort(), [20, 20, 75]);
+  const offlinePriced = { id: randomUUID(), items: [{ productId: prod.id, quantity: 1, soldPrice: 18 }] };
+  const op = (await api('/sync/push', admin, { body: { bills: [offlinePriced] } })).json;
+  assert.equal(op.results[0].ok, true);
+  assert.equal((await api(`/bills/${offlinePriced.id}`, admin)).json.items[0].soldPrice, 18);
+  const log = await prisma.activityLog.findFirst({ where: { shopId, action: 'offline_price_difference' } });
+  assert.match(log!.description, /Tea sold at ₹18 \(item price now ₹20\)/);
+
+  // Customer name is optional: a mobile number is enough (but one of them is needed).
+  const byPhone = await api('/customers', admin, { body: { phone: '9000000001' } });
+  assert.equal(byPhone.status, 201, JSON.stringify(byPhone.json));
+  assert.equal(byPhone.json.name, '');
+  assert.equal((await api('/customers', admin, { body: {} })).status, 400);
+  const quick = await api('/bills/checkout', admin, { body: { id: randomUUID(), customerPhone: '9000000002', items: [{ productId: prod.id, quantity: 1 }] } });
+  assert.equal(quick.json.customerName, null);
+  assert.equal(quick.json.customerContact, '9000000002');
 });
 
 test('purchases inward stock & supplier balance; returns; permissions', async () => {

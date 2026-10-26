@@ -29,7 +29,6 @@ class ShopSettings {
   bool get enableLoyalty => raw['enableLoyaltyPoints'] == true;
   double get loyaltyRatio => toDouble(raw['loyaltyPointsRatio'] ?? 100);
   String get paperSize => raw['paperSize'] ?? '58mm';
-  String get defaultPriceOption => raw['defaultPriceOption'] ?? 'base';
   bool get showLogoAndShop => raw['showLogoAndShop'] != false;
   bool get showBillDetails => raw['showBillDetails'] != false;
   bool get showCustomerAccount => raw['showCustomerAccount'] != false;
@@ -125,7 +124,9 @@ class Customer {
   Customer.phoneOnly(String phone) : raw = {'phone': phone};
   bool get isNew => raw['id'] == null;
   String get id => raw['id'];
-  String get name => raw['name'];
+  /// Name is optional (any shop type) – falls back to the mobile number.
+  String get name => (raw['name'] as String?)?.isNotEmpty == true ? raw['name'] : (raw['phone'] ?? 'Customer');
+  String? get savedName => (raw['name'] as String?)?.isNotEmpty == true ? raw['name'] : null;
   String? get phone => raw['phone'];
   String? get address => raw['address'];
   String? get gstin => raw['gstin'];

@@ -31,8 +31,8 @@ shopRouter.put('/', requirePermission('settings.manage'), async (req, res) => {
   const shopId = shopIdOf(req);
   const body = parse(ShopUpdate, req.body);
   const u = req.user!;
-  // Only admins may change shop type, printer type, price option & UPI (as in the original settings screen).
-  const adminOnly = body.shopType || body.upiId !== undefined || body.settings?.printerType || body.settings?.defaultPriceOption;
+  // Only admins may change shop type, printer type & UPI (as in the original settings screen).
+  const adminOnly = body.shopType || body.upiId !== undefined || body.settings?.printerType;
   if (adminOnly && u.role !== 'ADMIN' && u.role !== 'SUPER_ADMIN') throw forbidden('Only Admins can change these settings');
 
   const current = await prisma.shop.findUniqueOrThrow({ where: { id: shopId } });
