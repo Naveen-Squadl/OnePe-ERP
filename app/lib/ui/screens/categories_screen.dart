@@ -6,6 +6,7 @@ import '../../models/models.dart';
 import '../../state/catalog.dart';
 import '../widgets/app_shell.dart';
 import '../widgets/common.dart';
+import 'products/products_screen.dart';
 
 class CategoriesScreen extends StatefulWidget {
   const CategoriesScreen({super.key});
@@ -51,7 +52,7 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
   Widget build(BuildContext context) {
     final catalog = context.watch<Catalog>();
     return AppScaffold(
-      title: 'Category Management',
+      title: 'Categories',
       fab: FloatingActionButton.extended(onPressed: () => _edit(), icon: const Icon(Icons.add), label: const Text('Add Category')),
       body: catalog.categories.isEmpty
           ? const EmptyState(icon: Icons.category_outlined, title: 'No categories found. Tap + to add one.')
@@ -65,7 +66,12 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                   child: ListTile(
                     leading: Icon(c.isExpenseCategory ? Icons.money_off : Icons.category),
                     title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-                    subtitle: Text('${c.productCount} products'),
+                    subtitle: Text('${c.productCount} products • tap to view'),
+                    // Inventory hub: show this category's products in the Products tab.
+                    onTap: () {
+                      ProductsScreen.categoryFilter.value = c.id;
+                      DefaultTabController.maybeOf(context)?.animateTo(0);
+                    },
                     trailing: Wrap(spacing: 4, children: [
                       if (c.isStockCategory) const Pill('Stock Item', Colors.teal),
                       if (c.isExpenseCategory) const Pill('Expense', Colors.deepOrange),

@@ -71,7 +71,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
 
   @override
   Widget build(BuildContext context) => AppScaffold(
-        title: 'Manage Suppliers',
+        title: 'Suppliers',
         fab: FloatingActionButton.extended(onPressed: () => _edit(), icon: const Icon(Icons.add), label: const Text('Add Supplier')),
         body: Column(children: [
           Padding(padding: const EdgeInsets.all(12), child: SearchField(hint: 'Search suppliers by name or phone...', onChanged: (v) => setState(() => _q = v))),

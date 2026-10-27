@@ -1,7 +1,7 @@
 import { User } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { RolePermissions } from '../lib/permissions';
-import { readSettings } from './settings.service';
+import { shopView } from './settings.service';
 
 /** Everything the client needs after login / on app start. */
 export async function sessionPayload(u: User) {
@@ -24,7 +24,7 @@ export async function sessionPayload(u: User) {
       branchId: u.branchId,
       permissions: RolePermissions[u.role],
     },
-    shop: shop && { ...shop, settings: readSettings(shop.settings) },
+    shop: shop && shopView(shop),
     branches,
     plan,
   };

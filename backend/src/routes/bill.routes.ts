@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { BillKind, BillStatus, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { parse } from '../lib/validate';
+import { requireFeature } from '../lib/features';
 import { branchIdOf, requirePermission, shopIdOf } from '../middleware/auth';
 import { notFound } from '../lib/errors';
 import {
@@ -59,7 +60,7 @@ billRouter.post('/checkout', requirePermission('bills.create'), async (req, res)
   res.status(201).json(bill);
 });
 
-billRouter.post('/:id/kot', requirePermission('bills.create'), async (req, res) => {
+billRouter.post('/:id/kot', requirePermission('bills.create'), requireFeature('kot'), async (req, res) => {
   res.json(await markKotPrinted(shopIdOf(req), req.params.id));
 });
 

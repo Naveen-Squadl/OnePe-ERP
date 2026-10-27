@@ -4,7 +4,7 @@ import { ShopType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { parse, optStr } from '../lib/validate';
 import { requirePermission, shopIdOf } from '../middleware/auth';
-import { readSettings, ShopSettingsSchema } from '../services/settings.service';
+import { readSettings, shopView, ShopSettingsSchema } from '../services/settings.service';
 import { logActivity } from '../lib/activity';
 import { forbidden } from '../lib/errors';
 
@@ -12,7 +12,7 @@ export const shopRouter = Router();
 
 shopRouter.get('/', async (req, res) => {
   const shop = await prisma.shop.findUniqueOrThrow({ where: { id: shopIdOf(req) } });
-  res.json({ ...shop, settings: readSettings(shop.settings) });
+  res.json(shopView(shop));
 });
 
 const ShopUpdate = z.object({
@@ -31,14 +31,16 @@ shopRouter.put('/', requirePermission('settings.manage'), async (req, res) => {
   const shopId = shopIdOf(req);
   const body = parse(ShopUpdate, req.body);
   const u = req.user!;
-  // Only admins may change shop type, printer type & UPI (as in the original settings screen).
-  const adminOnly = body.shopType || body.upiId !== undefined || body.settings?.printerType;
+  // Only admins may change the business type, its features & UPI.
+  const adminOnly = body.shopType || body.upiId !== undefined || body.settings?.features;
   if (adminOnly && u.role !== 'ADMIN' && u.role !== 'SUPER_ADMIN') throw forbidden('Only Admins can change these settings');
 
   const current = await prisma.shop.findUniqueOrThrow({ where: { id: shopId } });
   const { settings, ...rest } = body;
-  const merged = settings ? { ...readSettings(current.settings), ...settings } : undefined;
+  const saved = readSettings(current.settings);
+  // Feature switches merge with the saved ones (sending one switch keeps the others).
+  const merged = settings ? { ...saved, ...settings, features: { ...saved.features, ...settings.features } } : undefined;
   const shop = await prisma.shop.update({ where: { id: shopId }, data: { ...rest, ...(merged && { settings: merged }) } });
   await logActivity(u, 'shop_updated', 'Updated shop settings', { fields: Object.keys(body) });
-  res.json({ ...shop, settings: readSettings(shop.settings) });
+  res.json(shopView(shop));
 });

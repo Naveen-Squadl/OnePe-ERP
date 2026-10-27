@@ -21,12 +21,12 @@ enum Role {
   STOCK_MANAGER
 }
 
+/// Business type: decides the available / default features (src/lib/features.ts).
 enum ShopType {
-  BAKERY
+  RESTAURANT // Restaurant / QSR / Bakery
   RETAIL
-  DISTRIBUTOR
-  PARKING
-  LOGISTICS
+  SERVICES
+  OTHER
 }
 
 enum Plan {
@@ -92,7 +92,7 @@ model Shop {
   maxBranches        Int       @default(1)
   subscriptionStart  DateTime  @default(now())
   subscriptionExpiry DateTime?
-  /// Free-form shop settings (printer, loyalty, KOT, price option, storage locations ...). Validated in code.
+  /// Shop settings: receipt sections, GST, loyalty ratio, tables, storage locations, features … (settings.service.ts).
   settings           Json      @default("{}")
   lastLoginAt        DateTime?
   createdAt          DateTime  @default(now())

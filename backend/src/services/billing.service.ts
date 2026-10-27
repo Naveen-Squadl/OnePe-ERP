@@ -7,7 +7,7 @@ import { nextBillNo } from '../lib/sequence';
 import { logActivity } from '../lib/activity';
 import { AuthUser } from '../middleware/auth';
 import { consumeBatches, moveStock, restoreBatches, BatchAllocation } from './stock.service';
-import { readSettings, ShopSettings } from './settings.service';
+import { readShopConfig, ShopConfig } from './settings.service';
 
 export const CheckoutSchema = z.object({
   id: z.string().uuid(),
@@ -123,7 +123,7 @@ async function priceItems(
   shopId: string,
   branchId: string,
   input: CheckoutInput,
-  settings: ShopSettings,
+  settings: ShopConfig,
   offline: boolean,
   priceChanges: string[],
 ): Promise<PricedItem[]> {
@@ -174,7 +174,7 @@ async function priceItems(
 }
 
 /** Apply stock + customer side effects of a completed bill. */
-async function applyEffects(tx: Tx, bill: BillWithItems, user: AuthUser | null, settings: ShopSettings, label: string) {
+async function applyEffects(tx: Tx, bill: BillWithItems, user: AuthUser | null, settings: ShopConfig, label: string) {
   if (bill.kind === BillKind.SALE) {
     for (const it of bill.items) {
       if (!it.productId) continue;
@@ -198,7 +198,7 @@ async function applyEffects(tx: Tx, bill: BillWithItems, user: AuthUser | null, 
     const opening = num(c.currentBalance);
     const applied = round2(num(bill.receivedAmount) - num(bill.changeAmount));
     const closing = round2(opening + num(bill.totalAmount) - applied);
-    const earned = settings.enableLoyaltyPoints ? Math.floor(num(bill.totalAmount) / settings.loyaltyPointsRatio) : 0;
+    const earned = settings.on.loyalty ? Math.floor(num(bill.totalAmount) / settings.loyaltyPointsRatio) : 0;
     await tx.customer.update({
       where: { id: c.id },
       data: {
@@ -280,7 +280,7 @@ export async function checkout(
   return prisma.$transaction(
     async (tx) => {
       const shop = await tx.shop.findUniqueOrThrow({ where: { id: shopId } });
-      const settings = readSettings(shop.settings);
+      const settings = readShopConfig(shop);
       const branch = await tx.branch.findUniqueOrThrow({ where: { id: branchId } });
       const existing = await tx.bill.findUnique({ where: { id: input.id }, include: billInclude });
 
@@ -312,7 +312,7 @@ export async function checkout(
       const lines = await priceItems(tx, shopId, branchId, input, settings, opts.offline ?? false, priceChanges);
 
       const availablePoints = customer ? num(customer.loyaltyPoints) : 0;
-      const redeemReq = settings.enableLoyaltyPoints ? Math.min(input.loyaltyPointsToRedeem, availablePoints) : 0;
+      const redeemReq = settings.on.loyalty ? Math.min(input.loyaltyPointsToRedeem, availablePoints) : 0;
       const totals = computeTotals(lines, input.discountType, input.discountValue, redeemReq, input.roundMode);
 
       // Payment
@@ -322,6 +322,9 @@ export async function checkout(
       else received = input.receivedAmount ?? totals.total;
       if (!customer && input.kind === BillKind.SALE && received < totals.total && input.status === BillStatus.COMPLETED) {
         throw badRequest('Received amount is less than bill total. Select a customer to record the balance as due.');
+      }
+      if (!settings.on.credit && customer && input.kind === BillKind.SALE && input.status === BillStatus.COMPLETED && received < totals.total) {
+        throw badRequest('Customer credit is turned off for this shop – collect the full amount (Settings → Features).');
       }
       const change = customer && !input.giveChange ? 0 : Math.max(0, round2(received - totals.total));
 
@@ -431,7 +434,7 @@ export async function restoreBill(user: AuthUser, shopId: string, id: string) {
     });
     if (out.status === BillStatus.COMPLETED) {
       const shop = await tx.shop.findUniqueOrThrow({ where: { id: shopId } });
-      await applyEffects(tx, out, user, readSettings(shop.settings), 'Re-deducted from Restored Bill: ');
+      await applyEffects(tx, out, user, readShopConfig(shop), 'Re-deducted from Restored Bill: ');
     }
     await logActivity(user, 'bill_restored', `Restored bill ${b.billNo}`, { billId: id }, tx, shopId);
     return tx.bill.findUniqueOrThrow({ where: { id }, include: billInclude });

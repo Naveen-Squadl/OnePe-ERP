@@ -1,3 +1,4 @@
+import '../core/features.dart';
 import '../core/format.dart';
 
 typedef Json = Map<String, dynamic>;
@@ -25,15 +26,12 @@ class ShopSettings {
   final Json raw;
   ShopSettings(this.raw);
   bool get gstInclusive => raw['gstInclusive'] == true;
-  bool get enableKot => raw['enableKot'] == true;
-  bool get enableLoyalty => raw['enableLoyaltyPoints'] == true;
   double get loyaltyRatio => toDouble(raw['loyaltyPointsRatio'] ?? 100);
-  String get paperSize => raw['paperSize'] ?? '58mm';
   bool get showLogoAndShop => raw['showLogoAndShop'] != false;
   bool get showBillDetails => raw['showBillDetails'] != false;
   bool get showCustomerAccount => raw['showCustomerAccount'] != false;
   bool get whatsappCustomerShare => raw['whatsappCustomerShare'] == true;
-  bool get enableFastPay => raw['enableFastPay'] != false;
+  int get expiryReminderDays => (raw['expiryReminderDays'] as num?)?.toInt() ?? 3;
   List<String> get storageLocations => List<String>.from(raw['storageLocations'] ?? const ['Showroom', 'Warehouse']);
   List<String> get tableNames => List<String>.from(raw['tableNames'] ?? const []);
 }
@@ -43,6 +41,9 @@ class Shop {
   final String? address, contactNumber, gstNumber, upiId, thanksNote, logoUrl;
   final DateTime? subscriptionExpiry;
   final ShopSettings settings;
+
+  /// Effective feature switches (sent by the server; computed locally for an older cached session).
+  final Map<String, bool> features;
   Shop.fromJson(Json j)
       : id = j['id'],
         name = j['name'],
@@ -55,8 +56,13 @@ class Shop {
         thanksNote = j['thanksNote'],
         logoUrl = j['logoUrl'],
         subscriptionExpiry = toDate(j['subscriptionExpiry']),
-        settings = ShopSettings(Map<String, dynamic>.from(j['settings'] ?? {}));
-  bool get isBakery => shopType == 'BAKERY';
+        settings = ShopSettings(Map<String, dynamic>.from(j['settings'] ?? {})),
+        features = j['features'] is Map
+            ? Map<String, bool>.from(j['features'])
+            : effectiveFeatures(j['shopType'] ?? 'OTHER', Map<String, dynamic>.from(j['settings']?['features'] ?? {}));
+
+  /// Whether a feature (tables, kot, stock, batches, barcode, purchases, credit, loyalty, locations) is on.
+  bool has(String feature) => features[feature] ?? false;
 }
 
 class Branch {
@@ -132,6 +138,7 @@ class Customer {
   String? get gstin => raw['gstin'];
   double get openingBalance => toDouble(raw['openingBalance']);
   double get balance => toDouble(raw['currentBalance']);
+
   double get loyaltyPoints => toDouble(raw['loyaltyPoints']);
   DateTime? get createdAt => toDate(raw['createdAt']);
 }
@@ -192,6 +199,7 @@ class Bill {
             if (toDouble(raw[key]) > 0) (label, toDouble(raw[key])),
         ];
   double get change => toDouble(raw['changeAmount']);
+
   double? get customerOpening => raw['customerOpeningBal'] == null ? null : toDouble(raw['customerOpeningBal']);
   double? get customerClosing => raw['customerClosingBal'] == null ? null : toDouble(raw['customerClosingBal']);
   String get paymentMethod => raw['paymentMethod'] ?? 'CASH';

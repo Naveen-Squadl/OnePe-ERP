@@ -10,7 +10,10 @@ import '../widgets/common.dart';
 /// printer, each Nexgo N82, Bluetooth or the system print dialog with the paper sizes it supports.
 class PrinterSettingsCard extends StatefulWidget {
   final VoidCallback onTestPrint;
-  const PrinterSettingsCard({super.key, required this.onTestPrint});
+
+  /// Show the KOT / kitchen printer (only when the shop has KOT on).
+  final bool kot;
+  const PrinterSettingsCard({super.key, required this.onTestPrint, this.kot = true});
 
   @override
   State<PrinterSettingsCard> createState() => _PrinterSettingsCardState();
@@ -38,36 +41,38 @@ class _PrinterSettingsCardState extends State<PrinterSettingsCard> {
       children: [
         _heading('Bill Printer'),
         _PrinterPicker(target: PrinterConfig.bill, testLabel: 'Send Test Bill Print', onTest: widget.onTestPrint, onChanged: () => setState(() {})),
-        const Padding(padding: EdgeInsets.fromLTRB(16, 16, 16, 0), child: Divider()),
-        _heading('KOT / Kitchen Printer'),
-        SwitchListTile(
-          title: const Text('Same as bill printer'),
-          subtitle: Text(
-            PrinterConfig.kotSameAsBill
-                ? 'Kitchen order tickets print on ${PrinterConfig.bill.displayName}'
-                : 'Kitchen order tickets print on a separate printer',
-          ),
-          value: PrinterConfig.kotSameAsBill,
-          onChanged: (v) async {
-            await PrinterConfig.setKotSameAsBill(v);
-            if (mounted) setState(() {});
-          },
-        ),
-        if (!PrinterConfig.kotSameAsBill)
-          _PrinterPicker(
-            target: PrinterConfig.kitchen,
-            testLabel: 'Send Test KOT Print',
-            onTest: () => guard(context, () => PrintService.printKot(_testKot)),
-          )
-        else
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-            child: OutlinedButton.icon(
-              onPressed: () => guard(context, () => PrintService.printKot(_testKot)),
-              icon: const Icon(Icons.soup_kitchen_outlined),
-              label: const Text('Send Test KOT Print'),
+        if (widget.kot) ...[
+          const Padding(padding: EdgeInsets.fromLTRB(16, 16, 16, 0), child: Divider()),
+          _heading('KOT / Kitchen Printer'),
+          SwitchListTile(
+            title: const Text('Same as bill printer'),
+            subtitle: Text(
+              PrinterConfig.kotSameAsBill
+                  ? 'Kitchen order tickets print on ${PrinterConfig.bill.displayName}'
+                  : 'Kitchen order tickets print on a separate printer',
             ),
+            value: PrinterConfig.kotSameAsBill,
+            onChanged: (v) async {
+              await PrinterConfig.setKotSameAsBill(v);
+              if (mounted) setState(() {});
+            },
           ),
+          if (!PrinterConfig.kotSameAsBill)
+            _PrinterPicker(
+              target: PrinterConfig.kitchen,
+              testLabel: 'Send Test KOT Print',
+              onTest: () => guard(context, () => PrintService.printKot(_testKot)),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+              child: OutlinedButton.icon(
+                onPressed: () => guard(context, () => PrintService.printKot(_testKot)),
+                icon: const Icon(Icons.soup_kitchen_outlined),
+                label: const Text('Send Test KOT Print'),
+              ),
+            ),
+        ],
       ],
     );
   }

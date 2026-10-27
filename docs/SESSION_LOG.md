@@ -73,7 +73,14 @@ user plugs in a phone with USB debugging, run `adb devices`, `adb reverse tcp:40
   (`Bill.cancelReason`, migration `20261024105019_bill_cancel_reason`), optional "Load items into a new bill" (re-bill).
   **Restore** of a cancelled bill = shop admin only. Waiting orders: Continue (normal Proceed/payment flow) or Delete.
   Backend test lifecycle updated; 5/5 passing; `flutter analyze` clean.
-- **Offline bill safety** (2026-10-26): `OfflineQueue` (offline_queue.dart) now auto-syncs every 30 s while bills are pending,
+  (Committed 2026-10-26 as b6a0fce.)
+
+---
+
+## Session 2026-10-26 – offline mode, pricing rule, menu & business types
+
+### Done – committed & pushed to GitHub main (79b1779 offline mode, 3153e34 item price + optional customer name)
+- **Offline bill safety**: `OfflineQueue` (offline_queue.dart) now auto-syncs every 30 s while bills are pending,
   on app resume and after login; entries keep shop, branch and sale time (`billDate`, so the bill gets that day's number).
   Pending count badge (POS header, drawer "Sync Cloud Data", Settings). Logout first tries to upload, then warns
   ("Logout anyway"). Android also writes each pending bill to `Download/OnePe/OfflineBills/bill_<id>.json` (native
@@ -111,15 +118,53 @@ user plugs in a phone with USB debugging, run `adb devices`, `adb reverse tcp:40
   can be used directly (`Customer.phoneOnly`, created on sync). Checked: backend 5/5 (pricing + optional-name tests),
   temp live Dart test (instant offline checkout, stock deduction, idle gating, customer cache), APK + web build.
 
+### Done – committed & pushed 2026-10-27 (menu & business types)
+- **Menu consolidated** (2026-10-26, user-approved plan): 14 drawer items → 7 areas with tabs (`HubScaffold`):
+  Inventory = Products (with stock; "Stock entry" mode = old Stock Levels; per-row Inward Batch) | Categories (tap → Products
+  filtered) | Batches & Expiry | Stock History; Purchases = Inwarded | Pending POs | Suppliers; Reports = Overview (dashboard) |
+  Reports (also inside the POS "Reports" mode); Settings = General | Printer | Users | Branches | Sync & Account. "Sync Cloud
+  Data" left the menu (POS sync button + a drawer line while bills are pending). Old routes redirect to the tabs.
+  Checked: analyze clean; temp widget test rendered every tab at 360 px and 1280 px with Manrope (no overflow).
+  POS side rail (wide) and phone dock follow the same menu order (`_destinations` from `navItems`). The rail shows every
+  area (no "More"); the dock shows what fits beside the cart button and adds "More" (drawer) only when needed
+  (360 px admin: New Bill · Bills · Inventory · More; ≥ 600 px: all 7; cashier: New Bill · Bills · Customers).
+  Counter screen renamed "Sell" → "New Bill" (user choice; matches the bill wording used everywhere).
+- **Business types & features** (2026-10-26, user decision): types are now Restaurant / QSR / Bakery (`RESTAURANT`), Retail,
+  Services, Others (Distributor → Retail, Parking/Logistics → Others; migration `20261026120000_business_types_and_features`
+  also keeps each shop's KOT / tables / loyalty choice as `settings.features`). Nine features (tables, kot, stock, batches,
+  barcode, purchases, credit, loyalty, locations) with per-type availability + defaults; admin switches them in Settings →
+  Features (changing the type resets them to its recommended set). Server: effective `features` in the shop payload,
+  `requireFeature` on KOT / stock changes / purchases / suppliers, credit + loyalty checks in billing, feature switches merge
+  on save, admin-only. App: Purchases menu, Batches / History tabs, KOT / table / credit / points in the cart, scan button,
+  stock badges, barcode / stock / location / batch fields (product form, purchases, stock entry), branch tables and the
+  KOT printer all follow `shop.has()`. Settings regrouped: Business · Features · Billing & Receipt · Printers · Users ·
+  Branches · Device & Account, each marked "whole shop" or "this device". Unused legacy settings dropped (printerType,
+  paperSize, bluetooth/network/kot printer keys, enableFastPay, whatsappDailyReport, autoKotOnCheckout; enableKot /
+  enableLoyaltyPoints → features). Tables and Kitchen screens for restaurants = next step.
+  Checked: backend 6/6 (new feature test), analyze clean, temp widget test (settings tabs at 360/1280 px, Services vs
+  Restaurant menus/tabs/POS). Dev DB backed up before the migration (scratchpad dump).
+
 ### Environment
-- Mac LAN IP **192.168.0.31**. API `npm run dev` on :4000; web build served by a no-cache python server on :8080.
-- Builds: `flutter build apk --release --dart-define=API_URL=http://192.168.0.31:4000`,
-  `flutter build web --release --pwa-strategy=none --dart-define=API_URL=http://192.168.0.31:4000`.
+- Mac LAN IP **192.168.0.31** (it was briefly 192.168.29.39 on 2026-10-26) – always check `ipconfig getifaddr en0`.
+  LAN run (2026-10-26): web built with `API_URL=http://192.168.0.31:4000` and served with
+  `python3 -m http.server 8080 --bind 0.0.0.0` → http://192.168.0.31:8080; new release APK built for the same IP
+  (not installed yet – no USB device). macOS firewall is off; API CORS allows any origin.
+- API `npm run dev` on :4000 (restart it after `prisma migrate` – the running process keeps the old Prisma client and
+  logins fail with 500); web build served by `python3 -m http.server 8080 --bind 127.0.0.1` from app/build/web.
+- Builds: `flutter build apk --release --dart-define=API_URL=http://<mac-ip>:4000`,
+  `flutter build web --release --dart-define=API_URL=http://localhost:4000` (open http://127.0.0.1:8080/?v=N#/pos).
 - Release APK installed on the user's **Nexgo N82**; Nexgo/Bluetooth printing and the OnePe app hand-off not yet confirmed on the device.
-- Demo DB test data from this session: bills ODB-MAIN-20261024-010…021 (021 cancelled, reason "Wrong item test").
+- Demo shop is now RESTAURANT (features kot/tables/loyalty on, barcode off by default → POS scan button hidden until switched on).
+- Demo DB test data: bills ODB-MAIN-20261024-010…021 (021 cancelled, "Wrong item test"); 2026-10-26 offline tests created and
+  cancelled a few bills ("offline test", "offline queue test").
+- Claude in Chrome extension was not connected this session → UI checked with temporary Flutter widget tests (Manrope font
+  loaded, 360 px + 1280 px) instead of screenshots.
 - Login 500 earlier was Docker Desktop hung + low disk; fix = restart Docker, `docker compose up -d`, free space.
 
 ### Next
-- Confirm on the N82: built-in print, Bluetooth print, OnePe app collect, payment-received pop-up, offline mode (backup folder, saved catalog, idle sync).
+- Restaurant-only screens: **Tables** (free/occupied grid, open/continue a table's order, KOT status) and **Kitchen** (KOT list).
+- Services extras later (staff per service, appointments) – user to confirm.
+- Confirm on the N82: built-in print, Bluetooth print, OnePe app collect, payment-received pop-up, offline mode (backup folder,
+  saved catalog, idle sync), new menus/settings.
 - Open question to the user: with collection ON, should Print Bill / Save without printing also ask the payment mode (currently saves as Cash)?
 - Returns / credit notes against a bill (`ReturnNote` model exists) as the GST-friendly correction path.

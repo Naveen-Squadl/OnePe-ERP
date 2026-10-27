@@ -3,12 +3,13 @@ import { z } from 'zod';
 import { PaymentMethod, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { parse, optStr } from '../lib/validate';
+import { requireFeature } from '../lib/features';
 import { requirePermission, shopIdOf } from '../middleware/auth';
 import { notFound } from '../lib/errors';
 import { logActivity } from '../lib/activity';
 
 export const supplierRouter = Router();
-supplierRouter.use(requirePermission('suppliers.manage', 'purchases.manage'));
+supplierRouter.use(requirePermission('suppliers.manage', 'purchases.manage'), requireFeature('purchases'));
 
 async function own(req: any) {
   const s = await prisma.supplier.findFirst({ where: { id: req.params.id, shopId: shopIdOf(req) } });

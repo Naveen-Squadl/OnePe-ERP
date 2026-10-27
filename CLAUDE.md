@@ -1,6 +1,6 @@
 # OnePe POS ERP — project guide for Claude
 
-Multi-tenant POS + inventory system (bakery / restaurant / retail / salon), a functional and visual
+Multi-tenant POS + inventory system (business types: Restaurant/QSR/Bakery, Retail, Services, Others), a functional and visual
 rebuild of **LABAN POS** (https://bakery-pos-490b7.web.app) under the **OnePe** brand.
 One Flutter codebase (web, Android, iOS) talking to our own Node/Postgres REST API.
 
@@ -34,7 +34,8 @@ app/       Flutter 3.41 / Dart 3.11, provider + go_router (assets/brand logos, a
   lib/services/  print_service.dart (PDF receipts/KOT/labels/reports, WhatsApp), offline_queue.dart
   lib/ui/widgets/ brand.dart (GradientAppBar, GreenButton, CategoryChip, ProductImage, PhotoPickerBox, RowAction…),
                   app_shell.dart (AppScaffold, AppDrawer, navItems), common.dart (Loader, guard, confirm…)
-  lib/ui/screens/ pos/, bills/, products/, customers/, stock/, purchases/, reports/, admin/, settings…
+  lib/ui/screens/ pos/, bills/, inventory/ (hub: products/ + categories + stock/stock_views), customers/, purchases/ (+ suppliers),
+                  reports/ (+ dashboard), settings (+ users, branches, offline_data_tiles), admin/
 docker-compose.yml  Postgres 16 (user/pass/db: onepe/onepe/onepe_pos, port 5432)
 ```
 
@@ -57,7 +58,7 @@ cashier `cashier@onepe.local / Cashier@123`.
 ### Android
 The phone talks to the **API**, never to Postgres directly.
 - USB: enable USB debugging → `adb reverse tcp:4000 tcp:4000` → `flutter run --release --dart-define=API_URL=http://localhost:4000`
-- Wi-Fi: `flutter build apk --release --dart-define=API_URL=http://<mac-lan-ip>:4000` (Mac IP 192.168.0.31 on 2026-10-24; check `ipconfig getifaddr en0`).
+- Wi-Fi: `flutter build apk --release --dart-define=API_URL=http://<mac-lan-ip>:4000` (Mac IP usually 192.168.0.31 – it was briefly 192.168.29.39 on 2026-10-26; always check `ipconfig getifaddr en0`).
 - Emulator: `API_URL=http://10.0.2.2:4000`.
 - `usesCleartextTraffic="true"` is set in AndroidManifest for dev HTTP — remove for production (HTTPS).
 - Release APK runs on the user's Nexgo N82 (2026-10-24); iOS not yet built. Release builds need `isMinifyEnabled = false` (Nexgo SDK).
@@ -78,6 +79,14 @@ The phone talks to the **API**, never to Postgres directly.
   **Restore** of a cancelled bill is shop-admin only. Waiting orders (not billed yet) can be continued (normal Proceed/payment flow) or deleted.
 - Stock: per-branch `ProductBranch.stock` + FIFO `StockBatch`; bill items store `batchAllocations` so reversals restore exact batches. Every change writes a `StockMovement`. Negative stock is allowed.
 - Bill number: `<SHOP INITIALS>-<BRANCH CODE>[-EXP]-<YYYYMMDD>-<SEQ3>` (e.g. `ODB-MAIN-20261015-001`), via `lib/sequence.ts`.
+- Menu (`navItems` in app_shell.dart): New Bill, Bills, Inventory, Purchases, Customers, Reports, Settings. Related screens are tabs
+  (`HubScaffold` + `HubTab`, `?tab=` in the URL; tabs hidden by permission); a screen's `AppScaffold` inside a hub tab renders
+  without its own app bar. Old paths (/products, /stock, /users…) redirect to the matching tab.
+- **Business type → features**: `backend/src/lib/features.ts` (mirror `app/lib/core/features.dart`, change both): tables, kot, stock,
+  batches, barcode, purchases, credit, loyalty, locations – available/default per type, admin switches in `settings.features`.
+  Server sends effective `shop.features` and enforces (`requireFeature`, credit/loyalty in billing); the app hides menus, tabs,
+  cart actions and form fields via `shop.has('…')`. Settings tabs: Business · Features · Billing & Receipt (whole shop) ·
+  Printers · Device & Account (this device) · Users · Branches.
 - Permissions: `src/lib/permissions.ts` role matrix; routes use `requirePermission(...)`; Flutter hides menu items via `session.can(...)`.
 - Tenant/branch context: `shopIdOf(req)`, `branchIdOf(req)` (header `X-Branch-Id`; super admin uses `X-Shop-Id`).
 - Prisma Decimals are serialized to JSON numbers by the replacer in `app.ts`.

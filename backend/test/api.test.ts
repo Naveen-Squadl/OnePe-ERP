@@ -35,12 +35,12 @@ before(async () => {
   base = `http://127.0.0.1:${(server.address() as any).port}`;
   const su = await login(process.env.SUPERADMIN_EMAIL!, process.env.SUPERADMIN_PASSWORD!);
   const shop = await api('/admin/shops', su, {
-    body: { shopName: `Test Shop ${tag}`, ownerName: 'Owner', email: `owner-${tag}@test.local`, password: 'Password1', plan: 'BASIC', shopType: 'BAKERY' },
+    body: { shopName: `Test Shop ${tag}`, ownerName: 'Owner', email: `owner-${tag}@test.local`, password: 'Password1', plan: 'BASIC', shopType: 'RESTAURANT' },
   });
   assert.equal(shop.status, 201, JSON.stringify(shop.json));
   shopId = shop.json.id;
   admin = await login(`owner-${tag}@test.local`, 'Password1');
-  await api('/shop', admin, { method: 'PUT', body: { settings: { enableLoyaltyPoints: true, loyaltyPointsRatio: 100 } } });
+  await api('/shop', admin, { method: 'PUT', body: { settings: { features: { loyalty: true }, loyaltyPointsRatio: 100 } } });
 });
 
 after(async () => {
@@ -265,4 +265,34 @@ test('product photo upload is stored and served', async () => {
   const bad = new FormData();
   bad.append('file', new Blob(['hello'], { type: 'text/plain' }), 'x.txt');
   assert.equal((await fetch(`${base}/api/uploads`, { method: 'POST', headers: { authorization: `Bearer ${admin}` }, body: bad })).status, 400);
+});
+
+test('business type features: defaults, admin switches, enforcement', async () => {
+  let shop = (await api('/shop', admin)).json;
+  assert.equal(shop.shopType, 'RESTAURANT');
+  assert.deepEqual([shop.features.kot, shop.features.tables, shop.features.loyalty, shop.features.barcode], [true, true, true, false]);
+
+  // Services: no KOT / tables / batches at all, stock and purchases off by default.
+  shop = (await api('/shop', admin, { method: 'PUT', body: { shopType: 'SERVICES' } })).json;
+  assert.deepEqual([shop.features.kot, shop.features.tables, shop.features.stock, shop.features.purchases], [false, false, false, false]);
+  assert.equal((await api('/purchases', admin)).status, 403);
+  assert.equal((await api('/suppliers', admin)).status, 403);
+  const prod = (await api('/products', admin, { body: { name: `Haircut ${tag}`, basePrice: 200, trackStock: false } })).json;
+  assert.equal((await api('/stock/adjust', admin, { body: { productId: prod.id, mode: 'set', quantity: 1 } })).status, 403);
+  const waiting = (await api('/bills/checkout', admin, { body: { id: randomUUID(), status: 'WAITING', items: [{ productId: prod.id, quantity: 1 }] } })).json;
+  assert.equal((await api(`/bills/${waiting.id}/kot`, admin, { body: {} })).status, 403);
+
+  // Switching a feature on (admin only) and credit off.
+  shop = (await api('/shop', admin, { method: 'PUT', body: { settings: { features: { purchases: true, credit: false } } } })).json;
+  assert.deepEqual([shop.features.purchases, shop.features.credit], [true, false]);
+  assert.equal((await api('/purchases', admin)).status, 200);
+  const due = await api('/bills/checkout', admin, {
+    body: { id: randomUUID(), customerPhone: '9000000003', items: [{ productId: prod.id, quantity: 1 }], paymentMethod: 'CASH', receivedAmount: 50, giveChange: false },
+  });
+  assert.equal(due.status, 400);
+  assert.match(due.json.error, /credit is turned off/);
+  // KOT is not available for Services even when switched on.
+  shop = (await api('/shop', admin, { method: 'PUT', body: { settings: { features: { kot: true } } } })).json;
+  assert.equal(shop.features.kot, false);
+  assert.deepEqual([shop.features.purchases, shop.features.credit], [true, false]); // earlier switches kept
 });

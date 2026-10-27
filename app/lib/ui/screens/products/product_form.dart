@@ -42,9 +42,9 @@ class _ProductDialogState extends State<_ProductDialog> {
   late String? _categoryId = p?.categoryId;
   late String? _location = p?.storageLocation;
   late bool _variable = p?.isPriceVariable ?? false;
-  late bool _track = p?.trackStock ?? true;
-  late bool _igst = p?.raw['isIgst'] == true;
+  late bool _track = p?.trackStock ?? (context.read<Session>().shop?.has('stock') ?? true);
   late bool _active = p?.raw['isActive'] != false;
+  late bool _igst = p?.raw['isIgst'] == true;
   late String _availability = p == null ? 'all_branches' : (p!.branchScope == 'ALL' ? 'all_branches' : 'specific_branches');
   final Map<String, ({bool enabled, TextEditingController price})> _branchCfg = {};
   bool _busy = false;
@@ -115,6 +115,8 @@ class _ProductDialogState extends State<_ProductDialog> {
     final session = context.watch<Session>();
     final cats = context.watch<Catalog>().categories;
     final locations = session.shop?.settings.storageLocations ?? const ['Showroom', 'Warehouse'];
+    bool has(String feature) => session.shop?.has(feature) ?? false;
+    final stock = has('stock');
     const gap = SizedBox(height: 14);
     final half = _n(_gstRate / 2);
     return Dialog(
@@ -138,53 +140,55 @@ class _ProductDialogState extends State<_ProductDialog> {
                 gap,
                 TextFormField(controller: _name, decoration: const InputDecoration(labelText: 'Product Name *'), validator: (v) => v!.trim().isEmpty ? 'Required' : null),
                 gap,
-                _section(
-                  color: AppColors.blue,
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    const Row(children: [
-                      Icon(Icons.qr_code_2, size: 18, color: AppColors.blue),
-                      SizedBox(width: 6),
-                      Text('Product Barcode / QR Code', style: TextStyle(color: AppColors.blue, fontWeight: FontWeight.w600)),
-                    ]),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: _barcode,
-                      decoration: InputDecoration(
-                        prefixIcon: const Icon(Icons.qr_code),
-                        hintText: 'Barcode / Item Code',
-                        suffixIcon: IconButton(
-                          icon: const Icon(Icons.photo_camera, color: AppColors.blue),
-                          onPressed: () async {
-                            final code = await scanBarcode(context);
-                            if (code != null) setState(() => _barcode.text = code);
-                          },
+                if (has('barcode')) ...[
+                  _section(
+                    color: AppColors.blue,
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                      const Row(children: [
+                        Icon(Icons.qr_code_2, size: 18, color: AppColors.blue),
+                        SizedBox(width: 6),
+                        Text('Product Barcode / QR Code', style: TextStyle(color: AppColors.blue, fontWeight: FontWeight.w600)),
+                      ]),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: _barcode,
+                        decoration: InputDecoration(
+                          prefixIcon: const Icon(Icons.qr_code),
+                          hintText: 'Barcode / Item Code',
+                          suffixIcon: IconButton(
+                            icon: const Icon(Icons.photo_camera, color: AppColors.blue),
+                            onPressed: () async {
+                              final code = await scanBarcode(context);
+                              if (code != null) setState(() => _barcode.text = code);
+                            },
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    FilledButton.icon(
-                      onPressed: () async {
-                        final code = await scanBarcode(context);
-                        if (code != null) setState(() => _barcode.text = code);
-                      },
-                      icon: const Icon(Icons.qr_code_scanner),
-                      label: const Text('Scan with Camera'),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(spacing: 8, children: [
-                      OutlinedButton.icon(onPressed: _autoBarcode, icon: const Icon(Icons.auto_awesome, size: 16), label: const Text('Auto-Generate')),
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(foregroundColor: AppColors.navy),
-                        onPressed: _barcode.text.trim().isEmpty
-                            ? null
-                            : () => PrintService.printBarcodeLabel(name: _name.text.isEmpty ? 'Product' : _name.text, code: _barcode.text.trim(), price: double.tryParse(_base.text) ?? 0),
-                        icon: const Icon(Icons.print, size: 16),
-                        label: const Text('Print Label'),
+                      const SizedBox(height: 10),
+                      FilledButton.icon(
+                        onPressed: () async {
+                          final code = await scanBarcode(context);
+                          if (code != null) setState(() => _barcode.text = code);
+                        },
+                        icon: const Icon(Icons.qr_code_scanner),
+                        label: const Text('Scan with Camera'),
                       ),
+                      const SizedBox(height: 8),
+                      Wrap(spacing: 8, children: [
+                        OutlinedButton.icon(onPressed: _autoBarcode, icon: const Icon(Icons.auto_awesome, size: 16), label: const Text('Auto-Generate')),
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(foregroundColor: AppColors.navy),
+                          onPressed: _barcode.text.trim().isEmpty
+                              ? null
+                              : () => PrintService.printBarcodeLabel(name: _name.text.isEmpty ? 'Product' : _name.text, code: _barcode.text.trim(), price: double.tryParse(_base.text) ?? 0),
+                          icon: const Icon(Icons.print, size: 16),
+                          label: const Text('Print Label'),
+                        ),
+                      ]),
                     ]),
-                  ]),
-                ),
-                gap,
+                  ),
+                  gap,
+                ],
                 DropdownButtonFormField<String?>(
                   initialValue: cats.any((c) => c.id == _categoryId) ? _categoryId : null,
                   decoration: const InputDecoration(labelText: 'Category *', prefixIcon: Icon(Icons.category_outlined)),
@@ -197,7 +201,7 @@ class _ProductDialogState extends State<_ProductDialog> {
                   child: TextButton.icon(
                     onPressed: () {
                       Navigator.pop(context, false);
-                      context.go('/categories');
+                      context.go('/inventory?tab=categories');
                     },
                     icon: const Icon(Icons.add, size: 16),
                     label: const Text('Add/Manage Categories'),
@@ -230,12 +234,12 @@ class _ProductDialogState extends State<_ProductDialog> {
                   Expanded(child: TextFormField(controller: _hsn, decoration: const InputDecoration(labelText: 'HSN / SAC Code', prefixIcon: Icon(Icons.confirmation_number_outlined)))),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: p == null
+                    child: p == null && stock
                         ? TextFormField(controller: _opening, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stock Qty'))
                         : TextFormField(controller: _purchase, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Purchase Price (₹)')),
                   ),
                 ]),
-                if (p == null) ...[
+                if (p == null && stock) ...[
                   gap,
                   TextFormField(controller: _purchase, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Purchase Price (₹)')),
                 ],
@@ -276,27 +280,30 @@ class _ProductDialogState extends State<_ProductDialog> {
                   value: _variable,
                   onChanged: (v) => setState(() => _variable = v!),
                 ),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Track stock'),
-                  subtitle: const Text('Turn off for services that have no inventory'),
-                  value: _track,
-                  onChanged: (v) => setState(() => _track = v!),
-                ),
-                if (_track) ...[
+                if (stock)
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Track stock'),
+                    subtitle: const Text('Turn off for services that have no inventory'),
+                    value: _track,
+                    onChanged: (v) => setState(() => _track = v!),
+                  ),
+                if (stock && _track) ...[
                   Row(children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String?>(
-                        initialValue: locations.contains(_location) ? _location : null,
-                        decoration: const InputDecoration(labelText: 'Storage Location'),
-                        items: [const DropdownMenuItem(value: null, child: Text('Unassigned')), for (final l in locations) DropdownMenuItem(value: l, child: Text(l))],
-                        onChanged: (v) => setState(() => _location = v),
+                    if (has('locations')) ...[
+                      Expanded(
+                        child: DropdownButtonFormField<String?>(
+                          initialValue: locations.contains(_location) ? _location : null,
+                          decoration: const InputDecoration(labelText: 'Storage Location'),
+                          items: [const DropdownMenuItem(value: null, child: Text('Unassigned')), for (final l in locations) DropdownMenuItem(value: l, child: Text(l))],
+                          onChanged: (v) => setState(() => _location = v),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 10),
+                      const SizedBox(width: 10),
+                    ],
                     Expanded(child: TextFormField(controller: _low, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Low stock alert at'))),
                   ]),
-                  if (p == null) ...[
+                  if (p == null && has('batches')) ...[
                     gap,
                     _section(
                       color: AppColors.orange,
@@ -314,6 +321,7 @@ class _ProductDialogState extends State<_ProductDialog> {
                     ),
                   ],
                 ],
+                if (p != null) SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('Active'), value: _active, onChanged: (v) => setState(() => _active = v)),
                 if (session.branches.length > 1) ...[
                   gap,
                   _section(
@@ -339,7 +347,6 @@ class _ProductDialogState extends State<_ProductDialog> {
                     ]),
                   ),
                 ],
-                if (p != null) SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('Active'), value: _active, onChanged: (v) => setState(() => _active = v)),
                 const SizedBox(height: 8),
               ]),
             ),

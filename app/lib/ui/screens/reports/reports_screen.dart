@@ -9,6 +9,7 @@ import '../../../services/print_service.dart';
 import '../../../state/session.dart';
 import '../../widgets/app_shell.dart';
 import '../../widgets/common.dart';
+import '../dashboard_screen.dart';
 import 'report_filters.dart';
 
 typedef ReportTable = ({List<List<String>> summary, List<String> headers, List<List<String>> rows});
@@ -126,11 +127,22 @@ final _reports = <_ReportDef>[
       )),
 ];
 
+/// Reports: Overview (dashboard) | Reports. [embedded]: inside the POS "Reports" mode (no app bar).
 class ReportsScreen extends StatelessWidget {
-  const ReportsScreen({super.key});
+  final String? tab;
+  final bool embedded;
+  const ReportsScreen({super.key, this.tab, this.embedded = false});
 
   @override
-  Widget build(BuildContext context) => const AppScaffold(title: 'Reports & Analytics', body: ReportsView());
+  Widget build(BuildContext context) => HubScaffold(
+        title: 'Reports',
+        initial: tab,
+        embedded: embedded,
+        tabs: [
+          HubTab('overview', 'Overview', (_) => const DashboardScreen(), permissions: const ['reports.view']),
+          HubTab('reports', 'Reports', (_) => ReportsView(embedded: embedded), permissions: const ['reports.view']),
+        ],
+      );
 }
 
 /// Filters | report tabs | quick actions. Also embedded in the POS "Reports ⇄" mode.

@@ -103,13 +103,15 @@ class _PosScreenState extends State<PosScreen> {
       ));
 
   /// Bottom bar / side menu destinations (filtered by permission).
-  List<_NavDest> _destinations(Session session, {required bool wide}) => [
-        _NavDest('Sell', Icons.grid_view_rounded, () => setState(() => _reportsMode = false), selected: !_reportsMode),
-        if (session.can('bills.view')) _NavDest('Bills', Icons.receipt_long_rounded, () => context.go('/bills')),
-        if (session.can('reports.view')) _NavDest('Reports', Icons.bar_chart_rounded, () => setState(() => _reportsMode = true), selected: _reportsMode),
-        if (wide && session.can('customers.manage')) _NavDest('Customers', Icons.people_alt_rounded, () => context.go('/customers')),
-        if (wide && session.can('inventory.view')) _NavDest('Stock', Icons.inventory_2_rounded, () => context.go('/stock')),
-        if (wide && session.can('settings.manage')) _NavDest('Settings', Icons.tune_rounded, () => context.go('/settings')),
+  /// Side rail / dock destinations: the main menu ([navItems]) in the same order, filtered by permission.
+  /// New Bill and Reports switch the POS between billing and its inline reports; the others open their area.
+  List<_NavDest> _destinations(Session session) => [
+        for (final n in navItems.where((n) => n.allowedFor(session)))
+          switch (n.path) {
+            '/pos' => _NavDest(n.label, Icons.grid_view_rounded, () => setState(() => _reportsMode = false), selected: !_reportsMode),
+            '/reports' => _NavDest(n.label, n.icon, () => setState(() => _reportsMode = true), selected: _reportsMode),
+            _ => _NavDest(n.label, n.icon, () => context.go(n.path)),
+          },
       ];
 
   @override
@@ -130,13 +132,13 @@ class _PosScreenState extends State<PosScreen> {
           child: Padding(
             padding: const EdgeInsets.all(14),
             child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Builder(builder: (c) => _SideRail(items: _destinations(session, wide: true), onMore: () => Scaffold.of(c).openDrawer())),
+              _SideRail(items: _destinations(session)),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   header,
                   const SizedBox(height: 6),
-                  Expanded(child: _reportsMode ? const ReportsView(embedded: true) : _productArea(wide)),
+                  Expanded(child: _reportsMode ? const ReportsScreen(embedded: true) : _productArea(wide)),
                 ]),
               ),
               const SizedBox(width: 14),
@@ -156,7 +158,7 @@ class _PosScreenState extends State<PosScreen> {
           header,
           Expanded(
             child: _reportsMode
-                ? const Padding(padding: EdgeInsets.only(bottom: 84), child: ReportsView(embedded: true))
+                ? const Padding(padding: EdgeInsets.only(bottom: 84), child: ReportsScreen(embedded: true))
                 : Column(children: [
                     Transform.translate(offset: const Offset(0, -30), child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: _searchField())),
                     Expanded(child: Transform.translate(offset: const Offset(0, -22), child: _productArea(wide))),
@@ -171,7 +173,7 @@ class _PosScreenState extends State<PosScreen> {
             top: false,
             child: Builder(
               builder: (c) => _Dock(
-                items: _destinations(session, wide: false),
+                items: _destinations(session),
                 onMore: () => Scaffold.of(c).openDrawer(),
                 cartCount: cart.itemCount,
                 cartTotal: cart.payable,
@@ -227,14 +229,15 @@ class _PosScreenState extends State<PosScreen> {
             onPressed: _toggleView,
             icon: Icon(_view == 'grid' ? Icons.view_list_rounded : Icons.grid_view_rounded, color: AppColors.muted),
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: IconButton.filled(
-              tooltip: 'Scan QR / Barcode for Rapid Bill',
-              onPressed: _scan,
-              style: IconButton.styleFrom(backgroundColor: AppColors.blue, foregroundColor: Colors.white, fixedSize: const Size(40, 40)),
-              icon: const Icon(Icons.qr_code_scanner_rounded, size: 20),
-            ),
+          if (context.watch<Session>().shop?.has('barcode') ?? false)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: IconButton.filled(
+                tooltip: 'Scan QR / Barcode for Rapid Bill',
+                onPressed: _scan,
+                style: IconButton.styleFrom(backgroundColor: AppColors.blue, foregroundColor: Colors.white, fixedSize: const Size(40, 40)),
+                icon: const Icon(Icons.qr_code_scanner_rounded, size: 20),
+              ),
           ),
         ]),
       ),
@@ -327,7 +330,7 @@ class _PosScreenState extends State<PosScreen> {
               subtitle: Row(children: [
                 Text(money(p.price), style: const TextStyle(color: AppColors.price, fontWeight: FontWeight.w800)),
                 const SizedBox(width: 10),
-                if (p.trackStock && !p.isExpense) _StockText(p),
+                if (_showsStock(context, p)) _StockText(p),
               ]),
               trailing: _AddOrStepper(product: p, onAdd: () => _addProduct(p)),
             ),
@@ -335,6 +338,9 @@ class _PosScreenState extends State<PosScreen> {
         },
       );
 }
+
+/// Stock is shown for stock-tracked items when the shop has stock tracking on.
+bool _showsStock(BuildContext context, Product p) => p.trackStock && !p.isExpense && (context.read<Session>().shop?.has('stock') ?? false);
 
 class _StockText extends StatelessWidget {
   final Product p;
@@ -444,7 +450,7 @@ class _ProductCard extends StatelessWidget {
               height: imageHeight,
               child: Stack(fit: StackFit.expand, children: [
                 ProductImage(url: p.imageUrl, radius: BorderRadius.circular(17)),
-                if (p.trackStock && !p.isExpense) Positioned(left: 6, top: 6, child: _StockBadge(p)),
+                if (_showsStock(context, p)) Positioned(left: 6, top: 6, child: _StockBadge(p)),
               ]),
             ),
             const SizedBox(height: 8),
@@ -666,19 +672,21 @@ class _PosHeader extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(width: 8),
-            TextButton.icon(
-              onPressed: () => pickTable(context, cart),
-              style: TextButton.styleFrom(
-                backgroundColor: Colors.white.withValues(alpha: .14),
-                foregroundColor: Colors.white,
-                minimumSize: const Size(0, 44),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            if (session.shop?.has('tables') ?? false) ...[
+              const SizedBox(width: 8),
+              TextButton.icon(
+                onPressed: () => pickTable(context, cart),
+                style: TextButton.styleFrom(
+                  backgroundColor: Colors.white.withValues(alpha: .14),
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(0, 44),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                icon: const Icon(Icons.table_restaurant_rounded, size: 18),
+                label: Text(cart.tableName ?? 'Table', style: const TextStyle(fontSize: 13)),
               ),
-              icon: const Icon(Icons.table_restaurant_rounded, size: 18),
-              label: Text(cart.tableName ?? 'Table', style: const TextStyle(fontSize: 13)),
-            ),
+            ],
             const SizedBox(width: 8),
             IconButton(
               tooltip: 'New Order',
@@ -726,11 +734,10 @@ class _LimeStep extends StatelessWidget {
       ]);
 }
 
-/// Navy side menu (web / tablet) with the lime OnePe icon.
+/// Navy side menu (web / tablet) with the lime OnePe icon: every menu area, in menu order.
 class _SideRail extends StatelessWidget {
   final List<_NavDest> items;
-  final VoidCallback onMore;
-  const _SideRail({required this.items, required this.onMore});
+  const _SideRail({required this.items});
 
   Widget _item(_NavDest d) => Padding(
         padding: const EdgeInsets.only(bottom: 6),
@@ -762,12 +769,12 @@ class _SideRail extends StatelessWidget {
           const BrandLogo(height: 60, lime: true, iconOnly: true),
           const SizedBox(height: 10),
           Expanded(child: SingleChildScrollView(child: Column(children: [for (final d in items) _item(d)]))),
-          _item(_NavDest('More', Icons.menu_rounded, onMore)),
         ]),
       );
 }
 
-/// Floating navy bottom bar (phone): Sell · Bills · Reports · More, plus the lime cart button.
+/// Floating navy bottom bar (phone): the menu areas that fit beside the lime cart button, in menu order;
+/// when not all fit, the last slot is "More" (opens the full menu).
 class _Dock extends StatelessWidget {
   final List<_NavDest> items;
   final VoidCallback onMore;
@@ -798,34 +805,39 @@ class _Dock extends StatelessWidget {
           borderRadius: BorderRadius.circular(22),
           boxShadow: [BoxShadow(color: AppColors.navy.withValues(alpha: .35), blurRadius: 24, offset: const Offset(0, 10))],
         ),
-        child: Row(children: [
-          for (final d in items) _icon(d),
-          _icon(_NavDest('More', Icons.more_horiz_rounded, onMore)),
-          const Spacer(),
-          Material(
-            color: AppColors.lime,
-            borderRadius: BorderRadius.circular(16),
-            child: InkWell(
+        child: LayoutBuilder(builder: (context, box) {
+          const iconWidth = 46.0, cartWidth = 128.0;
+          final slots = ((box.maxWidth - cartWidth) / iconWidth).floor();
+          final all = items.length <= slots;
+          return Row(children: [
+            for (final d in all ? items : items.take(slots - 1)) _icon(d),
+            if (!all) _icon(_NavDest('More', Icons.more_horiz_rounded, onMore)),
+            const Spacer(),
+            Material(
+              color: AppColors.lime,
               borderRadius: BorderRadius.circular(16),
-              onTap: onCart,
-              child: Container(
-                height: 48,
-                padding: const EdgeInsets.fromLTRB(8, 0, 12, 0),
-                child: Row(children: [
-                  Container(
-                    constraints: const BoxConstraints(minWidth: 30),
-                    height: 30,
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(color: AppColors.blue, borderRadius: BorderRadius.circular(10)),
-                    child: Text(qty(cartCount), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(money(cartTotal).replaceAll('.00', ''), style: const TextStyle(color: AppColors.navy, fontWeight: FontWeight.w800, fontSize: 15, letterSpacing: -0.3)),
-                ]),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: onCart,
+                child: Container(
+                  height: 48,
+                  padding: const EdgeInsets.fromLTRB(8, 0, 12, 0),
+                  child: Row(children: [
+                    Container(
+                      constraints: const BoxConstraints(minWidth: 30),
+                      height: 30,
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(color: AppColors.blue, borderRadius: BorderRadius.circular(10)),
+                      child: Text(qty(cartCount), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(money(cartTotal).replaceAll('.00', ''), style: const TextStyle(color: AppColors.navy, fontWeight: FontWeight.w800, fontSize: 15, letterSpacing: -0.3)),
+                  ]),
+                ),
               ),
             ),
-          ),
-        ]),
+          ]);
+        }),
       );
 }

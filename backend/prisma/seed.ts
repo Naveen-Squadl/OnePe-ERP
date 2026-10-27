@@ -30,12 +30,12 @@ async function main() {
       ownerEmail: demoEmail,
       address: '12 MG Road, Bengaluru',
       contactNumber: '9876543210',
-      shopType: 'BAKERY',
+      shopType: 'RESTAURANT',
       plan: 'PREMIUM',
       maxUsers: 10,
       maxBranches: 3,
       subscriptionExpiry: new Date(Date.now() + 365 * 86_400_000),
-      settings: { enableKot: true, enableLoyaltyPoints: true, loyaltyPointsRatio: 100, tableNames: ['T1', 'T2', 'T3', 'T4', 'T5', 'Parcel'] },
+      settings: { features: { kot: true, tables: true, loyalty: true }, loyaltyPointsRatio: 100, tableNames: ['T1', 'T2', 'T3', 'T4', 'T5', 'Parcel'] },
     },
   });
   const branch = await prisma.branch.create({

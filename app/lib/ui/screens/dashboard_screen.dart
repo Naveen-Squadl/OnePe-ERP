@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api.dart';
-import '../../core/config.dart';
 import '../../core/format.dart';
 import '../../core/theme.dart';
 import '../../state/session.dart';
@@ -25,15 +24,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     final branch = context.watch<Session>().activeBranchId;
     return AppScaffold(
-      title: 'Dashboard',
+      title: 'Overview',
       actions: [
-        Center(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)),
-            child: const Text('v${AppConfig.version}', style: TextStyle(color: AppColors.blue, fontSize: 11, fontWeight: FontWeight.w700)),
-          ),
-        ),
         IconButton(tooltip: 'Refresh', onPressed: () => setState(() => _v++), icon: const Icon(Icons.refresh)),
       ],
       body: Loader<Map<String, dynamic>>(

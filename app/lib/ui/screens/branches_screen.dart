@@ -17,13 +17,14 @@ class _BranchesScreenState extends State<BranchesScreen> {
   int _v = 0;
 
   Future<void> _edit([Map<String, dynamic>? b]) async {
+    final tables = context.read<Session>().shop?.has('tables') ?? false;
     final r = await showFormDialog(context, title: b == null ? 'Add New Branch / Outlet' : 'Edit Branch: ${b['name']}', submit: b == null ? 'Create Branch' : 'Save Changes', fields: [
       FieldSpec('name', 'Branch Name', initial: b?['name'], required: true),
       FieldSpec('code', 'Short Code (used in bill numbers, e.g. MG1)', initial: b?['code']),
       FieldSpec('address', 'Address', initial: b?['address']),
       FieldSpec('contactNumber', 'Contact Number', initial: b?['contactNumber'], keyboard: TextInputType.phone),
       FieldSpec('upiId', 'UPI ID (for QR payments)', initial: b?['upiId']),
-      FieldSpec('tables', 'Dine-In Tables (comma separated)', initial: (b?['tableNames'] as List?)?.join(', ') ?? 'T1, T2, T3, T4, T5, Parcel'),
+      if (tables) FieldSpec('tables', 'Dine-In Tables (comma separated)', initial: (b?['tableNames'] as List?)?.join(', ') ?? 'T1, T2, T3, T4, T5, Parcel'),
     ]);
     if (r == null || !mounted) return;
     final body = {
@@ -32,7 +33,7 @@ class _BranchesScreenState extends State<BranchesScreen> {
       'address': r['address'],
       'contactNumber': r['contactNumber'],
       'upiId': r['upiId'],
-      'tableNames': r['tables']!.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toList(),
+      if (tables) 'tableNames': r['tables']!.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toList(),
     };
     final ok = await guard(context, () => b == null ? Api.instance.post('/branches', body) : Api.instance.put('/branches/${b['id']}', body), success: 'Branch saved');
     if (ok != null && mounted) {

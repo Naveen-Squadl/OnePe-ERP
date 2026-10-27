@@ -3,19 +3,27 @@ import 'package:provider/provider.dart';
 
 import '../../core/api.dart';
 import '../../core/config.dart';
+import '../../core/features.dart';
+import '../../core/theme.dart';
 import '../../models/models.dart';
 import '../../services/print_service.dart';
 import '../../services/printer_config.dart';
+import '../../state/catalog.dart';
 import '../../state/session.dart';
 import '../widgets/app_shell.dart';
 import '../widgets/brand.dart';
 import '../widgets/common.dart';
 import '../widgets/form_dialog.dart';
+import 'branches_screen.dart';
 import 'offline_data_tiles.dart';
 import 'printer_settings.dart';
+import 'users_screen.dart';
 
+/// Settings: Business | Features | Billing & Receipt (whole shop) | Printers (this device) | Users | Branches |
+/// Device & Account (this device). Tabs by permission; business type and features are admin-only.
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  final String? tab;
+  const SettingsScreen({super.key, this.tab});
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
@@ -31,9 +39,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late String _type = shop.shopType;
   late String? _logo = shop.logoUrl;
   late final Map<String, dynamic> _s = Map<String, dynamic>.from(shop.settings.raw);
+
+  /// Feature switches the admin chose (missing = business-type default).
+  late final Map<String, dynamic> _features = Map<String, dynamic>.from(_s['features'] ?? const {});
   bool _busy = false;
 
   bool get _isAdmin => context.read<Session>().user!.isAdmin;
+  Map<String, bool> get _on => effectiveFeatures(_type, _features);
 
   Future<void> _save() async {
     if (_name.text.trim().isEmpty) return showSnack(context, 'Please enter shop name', error: true);
@@ -47,10 +59,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'logoUrl': _logo,
       if (_isAdmin) 'upiId': _upi.text.trim().isEmpty ? null : _upi.text.trim(),
       if (_isAdmin) 'shopType': _type,
-      'settings': Map<String, dynamic>.from(_s)..removeWhere((k, _) => !_isAdmin && k == 'printerType'),
+      'settings': {
+        for (final k in const ['gstInclusive', 'showLogoAndShop', 'showBillDetails', 'showCustomerAccount', 'loyaltyPointsRatio', 'whatsappCustomerShare', 'storageLocations', 'tableNames', 'expiryReminderDays'])
+          if (_s[k] != null) k: _s[k],
+        if (_isAdmin) 'features': _features,
+      },
     };
     final r = await guard(context, () => Api.instance.put('/shop', body), success: 'Settings saved');
-    if (r != null && mounted) await context.read<Session>().refresh();
+    if (r != null && mounted) {
+      await context.read<Session>().refresh();
+      if (mounted) context.read<Catalog>().load();
+    }
     if (mounted) setState(() => _busy = false);
   }
 
@@ -98,120 +117,237 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await guard(context, () => PrintService.printBill(test, Shop.fromJson({...s.shop!.toJsonForPreview(), 'settings': _s}), branch: s.activeBranch));
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final session = context.watch<Session>();
-    return AppScaffold(
-      title: 'Settings',
-      actions: [
-        Padding(
-          padding: const EdgeInsets.only(right: 8),
-          child: IconButton(tooltip: 'Save Settings', onPressed: _busy ? null : _save, icon: const Icon(Icons.save)),
-        ),
-      ],
-      body: Center(
+  Widget _page(String scope, List<Widget> children) => Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 820),
           child: ListView(padding: const EdgeInsets.all(12), children: [
-            _section('Shop Details', [
-              Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: PhotoPickerBox(url: _logo, label: 'Add Logo', onChanged: (u) => setState(() => _logo = u))),
-              _field(_name, 'Shop Name *'),
-              _field(_address, 'Address'),
-              _field(_contact, 'Contact Number'),
-              _field(_gst, 'GSTIN'),
-              _field(_upi, 'UPI ID (Optional)', enabled: _isAdmin, helper: _isAdmin ? 'For UPI QR code payments' : 'Only Admins can change UPI ID'),
-              _field(_thanks, 'Thank-you note on receipts'),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                child: DropdownButtonFormField<String>(
-                  initialValue: _type,
-                  decoration: InputDecoration(labelText: 'Shop Type', helperText: _isAdmin ? 'Changing this adjusts the POS interface' : 'Only Admins can change Shop Type'),
-                  items: const [
-                    DropdownMenuItem(value: 'BAKERY', child: Text('Bakery / Restaurant')),
-                    DropdownMenuItem(value: 'RETAIL', child: Text('Retail Store')),
-                    DropdownMenuItem(value: 'DISTRIBUTOR', child: Text('Distributor')),
-                  ],
-                  onChanged: _isAdmin ? (v) => setState(() => _type = v!) : null,
-                ),
-              ),
-            ]),
-            _section('Billing', [
-              _switch('gstInclusive', 'Prices include GST', subtitle: 'Off: GST is added on top of the item price'),
-              _switch('enableLoyaltyPoints', 'Enable loyalty points'),
-              if (_s['enableLoyaltyPoints'] == true)
-                ListTile(
-                  title: const Text('Loyalty ratio'),
-                  subtitle: Text('Earn 1 point per ₹${_s['loyaltyPointsRatio'] ?? 100} spent (1 point = ₹1 on redemption)'),
-                  trailing: const Icon(Icons.edit),
-                  onTap: () async {
-                    final v = await askNumber(context, 'Rupees per loyalty point', initial: (_s['loyaltyPointsRatio'] as num?)?.toDouble() ?? 100);
-                    if (v != null && v > 0) setState(() => _s['loyaltyPointsRatio'] = v);
-                  },
-                ),
-              _switch('enableKot', 'Enable Kitchen Order Tickets (KOT)', subtitle: 'Shows SEND TO KITCHEN in the cart'),
-              _switch('whatsappCustomerShare', 'Auto-share bill on WhatsApp after checkout'),
-              ListTile(
-                title: const Text('Dine-In Tables'),
-                subtitle: Text((_s['tableNames'] as List?)?.join(', ') ?? 'None (set per branch in Branches)'),
-                trailing: const Icon(Icons.edit),
-                onTap: () => _editList('tableNames', 'Dine-In Tables', 'T1, T2, T3, T4, T5, Parcel'),
-              ),
-              ListTile(
-                title: const Text('Storage Locations'),
-                subtitle: Text((_s['storageLocations'] as List?)?.join(', ') ?? 'Showroom, Warehouse'),
-                trailing: const Icon(Icons.edit),
-                onTap: () => _editList('storageLocations', 'Storage Locations', 'New Storage Location (e.g. Rack B, Godown 1)'),
-              ),
-            ]),
-            _section('Payments', [
-              SwitchListTile(
-                title: const Text('OnePe payment collection'),
-                subtitle: Text(
-                  PrinterConfig.onePeCollect
-                      ? 'Collect Payment and Print + Collect are shown after Proceed'
-                      : 'Off – after Proceed, confirm the amount received by Cash, UPI, Card or Split',
-                ),
-                value: PrinterConfig.onePeCollect,
-                onChanged: (v) async {
-                  await PrinterConfig.setOnePeCollect(v);
-                  if (mounted) setState(() {});
-                },
-              ),
-            ]),
-            _section('Printer Settings', [
-              PrinterSettingsCard(onTestPrint: _testPrint),
-              const Padding(padding: EdgeInsets.fromLTRB(16, 8, 16, 0), child: Text('Print Sections', style: TextStyle(fontWeight: FontWeight.w700))),
-              _switch('showLogoAndShop', '1. Logo & Shop Details', subtitle: 'Shop name, address, contact, logo', def: true),
-              _switch('showBillDetails', '2. Bill & Items Table', subtitle: 'Bill number, date, cashier, itemized prices', def: true),
-              _switch('showCustomerAccount', '3. Customer Account & Balances', subtitle: 'Customer name, phone, opening/closing balance', def: true),
-            ]),
+            // Whole shop vs this device, so it is clear why a printer set on one counter doesn't change others.
             Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: FilledButton.icon(onPressed: _busy ? null : _save, icon: const Icon(Icons.save), label: const Text('SAVE SETTINGS')),
+              padding: const EdgeInsets.only(bottom: 10, left: 4),
+              child: Row(children: [
+                Icon(scope == 'device' ? Icons.phone_android_rounded : Icons.storefront_rounded, size: 16, color: AppColors.muted),
+                const SizedBox(width: 6),
+                Text(scope == 'device' ? 'Applies to this device only' : 'Applies to the whole shop (all devices)',
+                    style: const TextStyle(fontSize: 12, color: AppColors.muted, fontWeight: FontWeight.w600)),
+              ]),
             ),
-            _section('Offline Data & Backup', const [OfflineDataTiles()]),
-            _section('Data & Account', [
-              ListTile(
-                leading: const Icon(Icons.password),
-                title: const Text('Change password'),
-                onTap: () async {
-                  final r = await showFormDialog(context, title: 'Change password', fields: const [
-                    FieldSpec('currentPassword', 'Current password', obscure: true, required: true),
-                    FieldSpec('newPassword', 'New password (min 6)', obscure: true, required: true),
-                  ]);
-                  if (r != null && context.mounted) await guard(context, () => Api.instance.post('/auth/change-password', r), success: 'Password changed');
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.workspace_premium_outlined),
-                title: Text('Plan: ${shop.plan}'),
-                subtitle: Text(session.plan == null ? 'No expiry' : 'Status: ${session.plan!['status']} • ${session.plan!['daysLeft']} days left'),
-              ),
-              ListTile(leading: const Icon(Icons.info_outline), title: Text('${AppConfig.appName} v${AppConfig.version}'), subtitle: Text('API: ${AppConfig.apiUrl}')),
-            ]),
+            ...children,
           ]),
         ),
-      ),
+      );
+
+  Widget get _saveButton => Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: FilledButton.icon(onPressed: _busy ? null : _save, icon: const Icon(Icons.save), label: const Text('SAVE SETTINGS')),
+      );
+
+  Widget _business() => AppScaffold(
+        title: 'Business',
+        body: _page('shop', [
+          _section('Business Type', [
+            RadioGroup<String>(
+              groupValue: _type,
+              onChanged: (v) => setState(() {
+                _type = v!;
+                _features.clear(); // start from the new type's recommended features
+              }),
+              child: Column(children: [
+                for (final t in businessTypes)
+                  RadioListTile<String>(
+                    value: t.id,
+                    enabled: _isAdmin,
+                    title: Text(t.label, style: const TextStyle(fontWeight: FontWeight.w700)),
+                    subtitle: Text(t.hint),
+                  ),
+              ]),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(_isAdmin ? 'Changing it resets Features to that type\'s recommended set.' : 'Only Admins can change the business type.',
+                  style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+            ),
+          ]),
+          _section('Shop Details', [
+            Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: PhotoPickerBox(url: _logo, label: 'Add Logo', onChanged: (u) => setState(() => _logo = u))),
+            _field(_name, 'Shop Name *'),
+            _field(_address, 'Address'),
+            _field(_contact, 'Contact Number'),
+            _field(_gst, 'GSTIN'),
+            _field(_upi, 'UPI ID (Optional)', enabled: _isAdmin, helper: _isAdmin ? 'For UPI QR code payments' : 'Only Admins can change UPI ID'),
+          ]),
+          _saveButton,
+        ]),
+      );
+
+  /// Extra options shown under a switched-on feature.
+  List<Widget> _featureDetails(String key) => switch (key) {
+        'tables' => [
+            ListTile(
+              contentPadding: const EdgeInsets.fromLTRB(32, 0, 16, 0),
+              title: const Text('Dine-in tables'),
+              subtitle: Text((_s['tableNames'] as List?)?.join(', ') ?? 'None (add per branch in Branches)'),
+              trailing: const Icon(Icons.edit),
+              onTap: () => _editList('tableNames', 'Dine-In Tables', 'T1, T2, T3, T4, T5, Parcel'),
+            ),
+          ],
+        'loyalty' => [
+            ListTile(
+              contentPadding: const EdgeInsets.fromLTRB(32, 0, 16, 0),
+              title: const Text('Loyalty ratio'),
+              subtitle: Text('Earn 1 point per ₹${_s['loyaltyPointsRatio'] ?? 100} spent (1 point = ₹1 on redemption)'),
+              trailing: const Icon(Icons.edit),
+              onTap: () async {
+                final v = await askNumber(context, 'Rupees per loyalty point', initial: (_s['loyaltyPointsRatio'] as num?)?.toDouble() ?? 100);
+                if (v != null && v > 0) setState(() => _s['loyaltyPointsRatio'] = v);
+              },
+            ),
+          ],
+        'batches' => [
+            ListTile(
+              contentPadding: const EdgeInsets.fromLTRB(32, 0, 16, 0),
+              title: const Text('Expiry reminder'),
+              subtitle: Text('Batches expiring within ${_s['expiryReminderDays'] ?? 3} day(s) are flagged'),
+              trailing: const Icon(Icons.edit),
+              onTap: () async {
+                final v = await askNumber(context, 'Expiry reminder (days)', initial: ((_s['expiryReminderDays'] as num?) ?? 3).toDouble());
+                if (v != null && v >= 0) setState(() => _s['expiryReminderDays'] = v.toInt());
+              },
+            ),
+          ],
+        'locations' => [
+            ListTile(
+              contentPadding: const EdgeInsets.fromLTRB(32, 0, 16, 0),
+              title: const Text('Locations'),
+              subtitle: Text((_s['storageLocations'] as List?)?.join(', ') ?? 'Showroom, Warehouse'),
+              trailing: const Icon(Icons.edit),
+              onTap: () => _editList('storageLocations', 'Storage Locations', 'New Storage Location (e.g. Rack B, Godown 1)'),
+            ),
+          ],
+        _ => const [],
+      };
+
+  Widget _featuresTab() {
+    final on = _on;
+    final available = featureInfo.where((f) => featureAvailable(_type, f.key)).toList();
+    return AppScaffold(
+      title: 'Features',
+      body: _page('shop', [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+          child: Text(
+            '${businessTypeLabel(_type)}: switch on what this shop uses. Menus, the cart and forms show only what is on.'
+            '${_isAdmin ? '' : ' Only Admins can change features.'}',
+            style: const TextStyle(color: AppColors.muted),
+          ),
+        ),
+        for (final group in const ['Selling', 'Inventory', 'Purchases'])
+          if (available.any((f) => f.group == group))
+            _section(group, [
+              for (final f in available.where((f) => f.group == group)) ...[
+                SwitchListTile(
+                  title: Row(children: [
+                    Flexible(child: Text(f.label)),
+                    if (featureDefaults[_type]![f.key] == true) ...[
+                      const SizedBox(width: 6),
+                      const Pill('Recommended', AppColors.green),
+                    ],
+                  ]),
+                  subtitle: Text(f.key == 'batches' && !on['stock']! ? 'Needs stock tracking' : f.description),
+                  value: on[f.key]!,
+                  onChanged: !_isAdmin || (f.key == 'batches' && !on['stock']!) ? null : (v) => setState(() => _features[f.key] = v),
+                ),
+                if (on[f.key]!) ..._featureDetails(f.key),
+              ],
+            ]),
+        _saveButton,
+      ]),
+    );
+  }
+
+  Widget _billing() => AppScaffold(
+        title: 'Billing & Receipt',
+        body: _page('shop', [
+          _section('Tax', [
+            _switch('gstInclusive', 'Prices include GST', subtitle: 'Off: GST is added on top of the item price'),
+          ]),
+          _section('Receipt', [
+            _field(_thanks, 'Thank-you note on receipts'),
+            const Padding(padding: EdgeInsets.fromLTRB(16, 8, 16, 0), child: Text('Print sections', style: TextStyle(fontWeight: FontWeight.w700))),
+            _switch('showLogoAndShop', '1. Logo & Shop Details', subtitle: 'Shop name, address, contact, logo', def: true),
+            _switch('showBillDetails', '2. Bill & Items Table', subtitle: 'Bill number, date, cashier, itemized prices', def: true),
+            _switch('showCustomerAccount', '3. Customer Account & Balances', subtitle: 'Customer name, phone, opening/closing balance', def: true),
+          ]),
+          _section('Sharing', [
+            _switch('whatsappCustomerShare', 'Auto-share bill on WhatsApp after checkout', subtitle: 'For bills with a customer mobile number'),
+          ]),
+          _saveButton,
+        ]),
+      );
+
+  Widget _printers() => AppScaffold(
+        title: 'Printers',
+        body: _page('device', [
+          _section('Printers', [PrinterSettingsCard(onTestPrint: _testPrint, kot: shop.has('kot'))]),
+        ]),
+      );
+
+  Widget _device(Session session) => AppScaffold(
+        title: 'Device & Account',
+        body: _page('device', [
+          _section('Payments', [
+            SwitchListTile(
+              title: const Text('OnePe payment collection'),
+              subtitle: Text(
+                PrinterConfig.onePeCollect
+                    ? 'Collect Payment and Print + Collect are shown after Proceed'
+                    : 'Off – after Proceed, confirm the amount received by Cash, UPI, Card or Split',
+              ),
+              value: PrinterConfig.onePeCollect,
+              onChanged: (v) async {
+                await PrinterConfig.setOnePeCollect(v);
+                if (mounted) setState(() {});
+              },
+            ),
+          ]),
+          _section('Offline Data & Backup', const [OfflineDataTiles()]),
+          _section('Account', [
+            ListTile(
+              leading: const Icon(Icons.password),
+              title: const Text('Change password'),
+              onTap: () async {
+                final r = await showFormDialog(context, title: 'Change password', fields: const [
+                  FieldSpec('currentPassword', 'Current password', obscure: true, required: true),
+                  FieldSpec('newPassword', 'New password (min 6)', obscure: true, required: true),
+                ]);
+                if (r != null && mounted) await guard(context, () => Api.instance.post('/auth/change-password', r), success: 'Password changed');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.workspace_premium_outlined),
+              title: Text('Plan: ${shop.plan}'),
+              subtitle: Text(session.plan == null ? 'No expiry' : 'Status: ${session.plan!['status']} • ${session.plan!['daysLeft']} days left'),
+            ),
+            ListTile(leading: const Icon(Icons.info_outline), title: Text('${AppConfig.appName} v${AppConfig.version}'), subtitle: Text('API: ${AppConfig.apiUrl}')),
+          ]),
+        ]),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final session = context.watch<Session>();
+    shop = session.shop ?? shop;
+    return HubScaffold(
+      title: 'Settings',
+      initial: widget.tab,
+      tabs: [
+        HubTab('business', 'Business', (_) => _business(), permissions: const ['settings.manage']),
+        HubTab('features', 'Features', (_) => _featuresTab(), permissions: const ['settings.manage']),
+        HubTab('billing', 'Billing & Receipt', (_) => _billing(), permissions: const ['settings.manage']),
+        HubTab('printers', 'Printers', (_) => _printers(), permissions: const ['settings.manage']),
+        HubTab('users', 'Users', (_) => const UsersScreen(), permissions: const ['users.manage']),
+        HubTab('branches', 'Branches', (_) => const BranchesScreen(), permissions: const ['branches.manage']),
+        HubTab('device', 'Device & Account', (_) => _device(session)),
+      ],
     );
   }
 }

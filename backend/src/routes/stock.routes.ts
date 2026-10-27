@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { parse, optStr } from '../lib/validate';
+import { requireFeature } from '../lib/features';
 import { branchIdOf, requirePermission, shopIdOf } from '../middleware/auth';
 import { notFound } from '../lib/errors';
 import { num } from '../lib/money';
@@ -47,7 +48,7 @@ const AdjustBody = z.object({
   note: optStr,
 });
 
-stockRouter.post('/adjust', requirePermission('inventory.manage'), async (req, res) => {
+stockRouter.post('/adjust', requirePermission('inventory.manage'), requireFeature('stock'), async (req, res) => {
   const shopId = shopIdOf(req);
   const branchId = await branchIdOf(req);
   const body = parse(AdjustBody, req.body);
@@ -62,7 +63,7 @@ stockRouter.post('/adjust', requirePermission('inventory.manage'), async (req, r
   res.json({ productId: p.id, stock });
 });
 
-stockRouter.post('/inward', requirePermission('inventory.manage'), async (req, res) => {
+stockRouter.post('/inward', requirePermission('inventory.manage'), requireFeature('stock'), async (req, res) => {
   const shopId = shopIdOf(req);
   const branchId = await branchIdOf(req);
   const body = parse(

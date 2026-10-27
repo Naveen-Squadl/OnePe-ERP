@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { PaymentMethod, Prisma, PurchaseStatus } from '@prisma/client';
 import { prisma, Tx } from '../lib/prisma';
 import { parse, optStr } from '../lib/validate';
+import { requireFeature } from '../lib/features';
 import { branchIdOf, requirePermission, shopIdOf } from '../middleware/auth';
 import { badRequest, notFound } from '../lib/errors';
 import { round2 } from '../lib/money';
@@ -12,7 +13,7 @@ import { logActivity } from '../lib/activity';
 import { AuthUser } from '../middleware/auth';
 
 export const purchaseRouter = Router();
-purchaseRouter.use(requirePermission('purchases.manage'));
+purchaseRouter.use(requirePermission('purchases.manage'), requireFeature('purchases'));
 
 purchaseRouter.get('/', async (req, res) => {
   const shopId = shopIdOf(req);

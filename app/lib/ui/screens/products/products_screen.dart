@@ -11,10 +11,18 @@ import '../../../state/session.dart';
 import '../../widgets/app_shell.dart';
 import '../../widgets/brand.dart';
 import '../../widgets/common.dart';
+import '../stock/stock_views.dart';
 import 'product_form.dart';
 
+/// Inventory → Products: the product list with stock. Edit/add/delete need products.manage; stock changes
+/// need inventory.manage – per row ("Inward Batch") or for many rows at once in "Stock entry" mode
+/// (Inward / Outward / Set a quantity per product, e.g. for a stock take).
 class ProductsScreen extends StatefulWidget {
   const ProductsScreen({super.key});
+
+  /// Set by the Categories tab to open the list filtered to one category.
+  static final categoryFilter = ValueNotifier<String?>(null);
+
   @override
   State<ProductsScreen> createState() => _ProductsScreenState();
 }
@@ -22,21 +30,139 @@ class ProductsScreen extends StatefulWidget {
 class _ProductsScreenState extends State<ProductsScreen> {
   String _q = '';
   String _scope = 'this_branch';
-  String? _categoryId;
+  String? _categoryId = ProductsScreen.categoryFilter.value;
   int _v = 0;
+  bool _stockEntry = false;
+
+  String _mode = 'add'; // add (Inward) | remove (Outward) | set
+  String? _location;
+  final Map<String, TextEditingController> _qtyCtrls = {};
+
+  Session get _session => context.read<Session>();
+  bool get _canEdit => _session.can('products.manage') || _session.can('products.edit_limited');
+  bool get _canManage => _session.can('products.manage');
+  bool _has(String feature) => _session.shop?.has(feature) ?? false;
+  bool get _canStock => _session.can('inventory.manage') && _has('stock');
 
   @override
   void initState() {
     super.initState();
+    ProductsScreen.categoryFilter.addListener(_onCategoryFilter);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (context.read<Catalog>().categories.isEmpty) context.read<Catalog>().load();
     });
+  }
+
+  @override
+  void dispose() {
+    ProductsScreen.categoryFilter.removeListener(_onCategoryFilter);
+    ProductsScreen.categoryFilter.value = null; // a category picked in the Categories tab applies once
+    for (final c in _qtyCtrls.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _onCategoryFilter() => setState(() => _categoryId = ProductsScreen.categoryFilter.value);
+
+  void _stockChanged() {
+    setState(() => _v++);
+    context.read<Catalog>().load();
+  }
+
+  Future<void> _inward(Product p) async {
+    if (await inwardBatch(context, p.raw) && mounted) setState(() => _v++);
+  }
+
+  /// Stock entry mode: apply the typed quantity to one product.
+  Future<void> _applyRow(Product p) async {
+    final v = double.tryParse(_qtyCtrls[p.id]!.text);
+    if (v == null || (v <= 0 && _mode != 'set')) return showSnack(context, 'Enter quantity', error: true);
+    final r = await guard(
+      context,
+      () => _mode == 'add'
+          ? Api.instance.post('/stock/inward', {'productId': p.id, 'quantity': v, 'location': _location})
+          : Api.instance.post('/stock/adjust', {'productId': p.id, 'mode': _mode, 'quantity': v}),
+    );
+    if (r != null && mounted) {
+      _qtyCtrls[p.id]!.text = '0';
+      showSnack(context, '✅ Stock updated for ${p.name}');
+      _stockChanged();
+    }
+  }
+
+  Widget _stockEntryBar() {
+    final locations = context.watch<Session>().shop?.settings.storageLocations ?? const ['Showroom', 'Warehouse'];
+    _location ??= locations.isNotEmpty ? locations.first : null;
+    final loc = DropdownButtonFormField<String?>(
+      initialValue: locations.contains(_location) ? _location : null,
+      isDense: true,
+      decoration: const InputDecoration(prefixIcon: Icon(Icons.store, color: AppColors.blue), isDense: true, labelText: 'Location (Inward)'),
+      items: [for (final l in locations) DropdownMenuItem(value: l, child: Text(l))],
+      onChanged: (v) => setState(() => _location = v),
+    );
+    final seg = SegmentedButton<String>(
+      segments: const [
+        ButtonSegment(value: 'add', icon: Icon(Icons.south_west), label: Text('Inward')),
+        ButtonSegment(value: 'remove', icon: Icon(Icons.north_east), label: Text('Outward')),
+        ButtonSegment(value: 'set', icon: Icon(Icons.edit_outlined), label: Text('Set')),
+      ],
+      showSelectedIcon: false,
+      selected: {_mode},
+      onSelectionChanged: (s) => setState(() => _mode = s.first),
+    );
+    if (!_has('locations')) {
+      _location = null;
+      return Container(
+        color: AppColors.lime.withValues(alpha: .25),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+        child: SizedBox(width: double.infinity, child: seg),
+      );
+    }
+    return Container(
+      color: AppColors.lime.withValues(alpha: .25),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      child: LayoutBuilder(
+        builder: (context, b) => b.maxWidth > 700
+            ? Row(children: [Expanded(child: loc), const SizedBox(width: 10), Expanded(child: seg)])
+            : Column(children: [loc, const SizedBox(height: 8), SizedBox(width: double.infinity, child: seg)]),
+      ),
+    );
+  }
+
+  Widget _qtyEntry(Product p) {
+    final ctrl = _qtyCtrls.putIfAbsent(p.id, () => TextEditingController(text: '0'));
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      SizedBox(
+        width: 76,
+        child: TextField(
+          controller: ctrl,
+          textAlign: TextAlign.center,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          style: const TextStyle(fontWeight: FontWeight.w700),
+          decoration: InputDecoration(fillColor: AppColors.bg, isDense: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none)),
+          onTap: () => ctrl.selection = TextSelection(baseOffset: 0, extentOffset: ctrl.text.length),
+          onSubmitted: (_) => _applyRow(p),
+        ),
+      ),
+      const SizedBox(width: 6),
+      Material(
+        color: AppColors.green,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: () => _applyRow(p),
+          child: const SizedBox(width: 42, height: 42, child: Icon(Icons.check, color: Colors.white)),
+        ),
+      ),
+    ]);
   }
 
   Future<List<Product>> _load() async =>
       (await Api.instance.get('/products', {'q': _q, 'scope': _scope, 'categoryId': _categoryId}) as List).map((e) => Product(Map<String, dynamic>.from(e))).toList();
 
   Future<void> _open([Product? p]) async {
+    if (!_canEdit) return;
     final saved = await showProductForm(context, p);
     if (saved && mounted) {
       setState(() => _v++);
@@ -76,16 +202,20 @@ class _ProductsScreenState extends State<ProductsScreen> {
     final cats = context.watch<Catalog>().categories;
     final multiBranch = context.watch<Session>().branches.length > 1;
     List<Product> current = const [];
+    final canStock = _canStock;
+    final batches = canStock && _has('batches');
+    final barcode = _has('barcode');
+    final showStock = _has('stock');
     return AppScaffold(
-      title: 'Product Management',
-      actions: [
-        IconButton(tooltip: 'Export products (PDF)', onPressed: () => _export(current), icon: const Icon(Icons.download_rounded)),
-      ],
-      fab: FloatingActionButton.extended(onPressed: () => _open(), icon: const Icon(Icons.add), label: const Text('Add Product')),
+      title: 'Products',
+      fab: _canManage && !_stockEntry ? FloatingActionButton.extended(onPressed: () => _open(), icon: const Icon(Icons.add), label: const Text('Add Product')) : null,
       body: Column(children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: _RoundSearch(hint: 'Search products by name, barcode or HSN...', onChanged: (v) => setState(() => _q = v)),
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
+          child: Row(children: [
+            Expanded(child: _RoundSearch(hint: 'Search products by name, barcode or HSN...', onChanged: (v) => setState(() => _q = v))),
+            IconButton(tooltip: 'Export products (PDF)', onPressed: () => _export(current), icon: const Icon(Icons.download_rounded, color: AppColors.navy)),
+          ]),
         ),
         SizedBox(
           height: 56,
@@ -93,6 +223,15 @@ class _ProductsScreenState extends State<ProductsScreen> {
             CategoryChip(label: 'All', color: AppColors.blue, selected: _categoryId == null, onTap: () => setState(() => _categoryId = null)),
             for (final (i, c) in cats.indexed)
               CategoryChip(label: c.name, color: AppColors.forIndex(i), selected: _categoryId == c.id, onTap: () => setState(() => _categoryId = c.id)),
+            if (canStock) ...[
+              const SizedBox(width: 8),
+              FilterChip(
+                avatar: const Icon(Icons.fact_check_rounded, size: 18),
+                label: const Text('Stock entry'),
+                selected: _stockEntry,
+                onSelected: (v) => setState(() => _stockEntry = v),
+              ),
+            ],
             if (multiBranch) ...[
               const SizedBox(width: 8),
               FilterChip(
@@ -103,12 +242,14 @@ class _ProductsScreenState extends State<ProductsScreen> {
             ],
           ]),
         ),
+        if (_stockEntry) _stockEntryBar(),
         const Divider(height: 1),
         Expanded(
           child: Loader<List<Product>>(
             key: ValueKey('$_q$_scope$_categoryId$_v'),
             load: _load,
-            builder: (context, list, reload) {
+            builder: (context, all, reload) {
+              final list = _stockEntry ? all.where((p) => p.trackStock).toList() : all;
               current = list;
               if (list.isEmpty) {
                 return ListView(children: const [SizedBox(height: 60), EmptyState(icon: Icons.inventory_2_outlined, title: 'No products match your search or filter.')]);
@@ -152,7 +293,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                               Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 6, runSpacing: 4, children: [
                                 Text(money(p.price).replaceAll('.00', ''), style: const TextStyle(color: AppColors.price, fontWeight: FontWeight.w700)),
                                 if (p.maxPrice != null) Text('- ${money(p.maxPrice).replaceAll('.00', '')}', style: const TextStyle(color: AppColors.muted)),
-                                if (p.trackStock)
+                                if (showStock && p.trackStock)
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                                     decoration: BoxDecoration(
@@ -166,32 +307,39 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                           style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: stock <= 0 || p.isLowStock ? AppColors.danger : AppColors.green)),
                                     ]),
                                   ),
-                                if (p.barcode != null) Text('• ${p.barcode}', style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+                                if (barcode && p.barcode != null) Text('• ${p.barcode}', style: const TextStyle(fontSize: 11, color: AppColors.muted)),
                                 if (narrow && catTag != null) catTag,
                               ]),
                             ]),
                           ),
-                          if (narrow)
-                            // Phones: one menu instead of three buttons so the name keeps its width.
+                          if (_stockEntry)
+                            _qtyEntry(p)
+                          else if (narrow)
+                            // Phones: one menu instead of the row buttons so the name keeps its width.
                             PopupMenuButton<String>(
                               tooltip: 'Actions',
                               icon: const Icon(Icons.more_vert_rounded, color: AppColors.navy),
                               onSelected: (v) => switch (v) {
+                                'inward' => _inward(p),
                                 'print' => _printLabel(p),
                                 'edit' => _open(p),
                                 _ => _delete(p),
                               },
-                              itemBuilder: (_) => const [
-                                PopupMenuItem(value: 'print', child: ListTile(leading: Icon(Icons.print), title: Text('Print Barcode'))),
-                                PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit, color: AppColors.blue), title: Text('Edit'))),
-                                PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, color: AppColors.danger), title: Text('Delete'))),
+                              itemBuilder: (_) => [
+                                if (batches && p.trackStock)
+                                  const PopupMenuItem(value: 'inward', child: ListTile(leading: Icon(Icons.move_to_inbox_rounded, color: AppColors.green), title: Text('Inward Batch'))),
+                                if (barcode) const PopupMenuItem(value: 'print', child: ListTile(leading: Icon(Icons.print), title: Text('Print Barcode'))),
+                                if (_canEdit) const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit, color: AppColors.blue), title: Text('Edit'))),
+                                if (_canManage)
+                                  const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, color: AppColors.danger), title: Text('Delete'))),
                               ],
                             )
                           else ...[
                             if (catTag != null) Padding(padding: const EdgeInsets.only(right: 8), child: catTag),
-                            RowAction(Icons.print, AppColors.navy, 'Print Barcode', () => _printLabel(p)),
-                            RowAction(Icons.edit, AppColors.blue, 'Edit', () => _open(p)),
-                            RowAction(Icons.delete_outline, AppColors.danger, 'Delete', () => _delete(p)),
+                            if (batches && p.trackStock) RowAction(Icons.move_to_inbox_rounded, AppColors.green, 'Inward Batch (with expiry)', () => _inward(p)),
+                            if (barcode) RowAction(Icons.print, AppColors.navy, 'Print Barcode', () => _printLabel(p)),
+                            if (_canEdit) RowAction(Icons.edit, AppColors.blue, 'Edit', () => _open(p)),
+                            if (_canManage) RowAction(Icons.delete_outline, AppColors.danger, 'Delete', () => _delete(p)),
                           ],
                         ]),
                       ),

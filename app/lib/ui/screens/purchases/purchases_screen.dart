@@ -11,9 +11,11 @@ import '../../widgets/app_shell.dart';
 import '../../widgets/brand.dart';
 import '../../widgets/common.dart';
 import '../../widgets/scanner.dart';
+import '../suppliers_screen.dart';
 
 class PurchasesScreen extends StatefulWidget {
-  const PurchasesScreen({super.key});
+  final String? tab;
+  const PurchasesScreen({super.key, this.tab});
   @override
   State<PurchasesScreen> createState() => _PurchasesScreenState();
 }
@@ -68,17 +70,24 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                             child: Wrap(spacing: 8, children: [
                               FilledButton.icon(
                                 onPressed: () async {
-                                  final locs = context.read<Session>().shop?.settings.storageLocations ?? const ['Main Store'];
-                                  final loc = await showDialog<String>(
-                                    context: context,
-                                    builder: (c) => SimpleDialog(
-                                      title: Text('Confirm destination storage location for ${items.length} product(s) from invoice ${p['invoiceNumber']}'),
-                                      children: [for (final l in locs) SimpleDialogOption(onPressed: () => Navigator.pop(c, l), child: Text(l))],
-                                    ),
-                                  );
-                                  if (loc == null || !context.mounted) return;
-                                  final r = await guard(context, () => Api.instance.post('/purchases/${p['id']}/inward', {'location': loc}),
-                                      success: '✅ PO materials inwarded into $loc');
+                                  final shop = context.read<Session>().shop;
+                                  String? loc;
+                                  if (shop?.has('locations') ?? false) {
+                                    final locs = shop!.settings.storageLocations;
+                                    loc = await showDialog<String>(
+                                      context: context,
+                                      builder: (c) => SimpleDialog(
+                                        title: Text('Confirm destination storage location for ${items.length} product(s) from invoice ${p['invoiceNumber']}'),
+                                        children: [for (final l in locs) SimpleDialogOption(onPressed: () => Navigator.pop(c, l), child: Text(l))],
+                                      ),
+                                    );
+                                    if (loc == null) return;
+                                  } else if (!await confirm(context, 'Inward Stock', 'Add ${items.length} product(s) from invoice ${p['invoiceNumber']} to stock?', ok: 'Inward')) {
+                                    return;
+                                  }
+                                  if (!context.mounted) return;
+                                  final r = await guard(context, () => Api.instance.post('/purchases/${p['id']}/inward', {'location': ?loc}),
+                                      success: loc == null ? '✅ PO materials inwarded' : '✅ PO materials inwarded into $loc');
                                   if (r != null) setState(() => _v++);
                                 },
                                 icon: const Icon(Icons.move_to_inbox),
@@ -103,15 +112,22 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
               ),
       );
 
+  Widget _purchases(String status) => AppScaffold(
+        title: 'Purchases',
+        fab: FloatingActionButton.extended(onPressed: _new, icon: const Icon(Icons.add), label: const Text('New Purchase Bill')),
+        body: _list(status),
+      );
+
+  /// Purchases: Inwarded | Pending POs | Suppliers.
   @override
-  Widget build(BuildContext context) => DefaultTabController(
-        length: 2,
-        child: AppScaffold(
-          title: 'Purchase Entry',
-          bottom: const TabBar(tabs: [Tab(text: 'Inwarded Purchases'), Tab(text: 'Pending POs')]),
-          fab: FloatingActionButton.extended(onPressed: _new, icon: const Icon(Icons.add), label: const Text('New Purchase Bill')),
-          body: TabBarView(children: [_list('RECEIVED'), _list('PENDING')]),
-        ),
+  Widget build(BuildContext context) => HubScaffold(
+        title: 'Purchases',
+        initial: widget.tab,
+        tabs: [
+          HubTab('received', 'Inwarded', (_) => _purchases('RECEIVED'), permissions: const ['purchases.manage']),
+          HubTab('pending', 'Pending POs', (_) => _purchases('PENDING'), permissions: const ['purchases.manage']),
+          HubTab('suppliers', 'Suppliers', (_) => const SuppliersScreen(), permissions: const ['suppliers.manage']),
+        ],
       );
 }
 
@@ -165,6 +181,7 @@ class _PurchaseFormState extends State<PurchaseForm> {
         builder: (c) => _ProductSearch(products: catalog.products.where((x) => !x.isExpense).toList()),
       );
     if (p == null || !mounted) return;
+    final batches = context.read<Session>().shop?.has('batches') ?? false;
     final q = TextEditingController(text: '1');
     final price = TextEditingController(text: (p.purchasePrice ?? 0).toString());
     final gst = TextEditingController(text: p.gstPercent.toStringAsFixed(0));
@@ -188,17 +205,19 @@ class _PurchaseFormState extends State<PurchaseForm> {
                   const SizedBox(width: 8),
                   SizedBox(width: 80, child: TextField(controller: gst, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'GST %'))),
                 ]),
-                const SizedBox(height: 10),
-                const Align(alignment: Alignment.centerLeft, child: Text('Food & Perishables (Optional)', style: TextStyle(fontWeight: FontWeight.w700))),
-                const SizedBox(height: 6),
-                TextField(controller: batch, decoration: const InputDecoration(labelText: 'Batch / Lot No. (Optional)', hintText: 'e.g. B-01 or leave empty to auto-generate')),
-                const SizedBox(height: 6),
-                Text(expiry == null ? 'Expiry Date: Not Set (Optional)' : 'Expiry Date: ${dateOnly(expiry!)}'),
-                Wrap(spacing: 6, children: [
-                  for (final d in const [(1, '+1 Day (Milk)'), (2, '+2 Days'), (3, '+3 Days'), (7, '+7 Days (Dairy)'), (30, '+30 Days')])
-                    ActionChip(label: Text(d.$2), onPressed: () => set(() => expiry = DateTime.now().add(Duration(days: d.$1)))),
-                  if (expiry != null) ActionChip(label: const Text('Clear Expiry Date'), onPressed: () => set(() => expiry = null)),
-                ]),
+                if (batches) ...[
+                  const SizedBox(height: 10),
+                  const Align(alignment: Alignment.centerLeft, child: Text('Food & Perishables (Optional)', style: TextStyle(fontWeight: FontWeight.w700))),
+                  const SizedBox(height: 6),
+                  TextField(controller: batch, decoration: const InputDecoration(labelText: 'Batch / Lot No. (Optional)', hintText: 'e.g. B-01 or leave empty to auto-generate')),
+                  const SizedBox(height: 6),
+                  Text(expiry == null ? 'Expiry Date: Not Set (Optional)' : 'Expiry Date: ${dateOnly(expiry!)}'),
+                  Wrap(spacing: 6, children: [
+                    for (final d in const [(1, '+1 Day (Milk)'), (2, '+2 Days'), (3, '+3 Days'), (7, '+7 Days (Dairy)'), (30, '+30 Days')])
+                      ActionChip(label: Text(d.$2), onPressed: () => set(() => expiry = DateTime.now().add(Duration(days: d.$1)))),
+                    if (expiry != null) ActionChip(label: const Text('Clear Expiry Date'), onPressed: () => set(() => expiry = null)),
+                  ]),
+                ],
               ]),
             ),
           ),
@@ -332,13 +351,15 @@ class _PurchaseFormState extends State<PurchaseForm> {
                   ),
                 ),
               ]),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<String?>(
-                initialValue: _location,
-                decoration: const InputDecoration(labelText: 'Storage Location', helperText: 'Manage Locations in Settings'),
-                items: [const DropdownMenuItem(value: null, child: Text('Unassigned')), for (final l in locs) DropdownMenuItem(value: l, child: Text(l))],
-                onChanged: (v) => setState(() => _location = v),
-              ),
+              if (context.watch<Session>().shop?.has('locations') ?? false) ...[
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String?>(
+                  initialValue: _location,
+                  decoration: const InputDecoration(labelText: 'Storage Location', helperText: 'Manage Locations in Settings'),
+                  items: [const DropdownMenuItem(value: null, child: Text('Unassigned')), for (final l in locs) DropdownMenuItem(value: l, child: Text(l))],
+                  onChanged: (v) => setState(() => _location = v),
+                ),
+              ],
               const SizedBox(height: 10),
               Row(children: [
                 Expanded(child: TextField(controller: _discount, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Discount (₹)'))),

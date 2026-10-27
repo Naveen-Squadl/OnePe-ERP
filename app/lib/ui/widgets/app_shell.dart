@@ -17,27 +17,91 @@ class NavItem {
   final IconData icon;
   final Color color;
   final String path;
-  final String? permission;
-  const NavItem(this.label, this.icon, this.color, this.path, [this.permission]);
+
+  /// Shown to users with any of these permissions (empty = everyone) …
+  final List<String> permissions;
+
+  /// … when this shop feature is on (Settings → Features).
+  final String? feature;
+  const NavItem(this.label, this.icon, this.color, this.path, [this.permissions = const [], this.feature]);
+
+  bool allowedFor(Session s) => (permissions.isEmpty || permissions.any(s.can)) && (feature == null || (s.shop?.has(feature!) ?? false));
 }
 
-/// Drawer order mirrors the original "Navigation Menu".
+/// Main menu: one entry per area; related screens are tabs inside it ([HubScaffold]).
 const navItems = [
-  NavItem('Dashboard', Icons.dashboard_rounded, AppColors.blue, '/dashboard', 'reports.view'),
-  NavItem('Manage Products', Icons.inventory_2_rounded, Color(0xFFE09A00), '/products', 'products.manage'),
-  NavItem('Manage Categories', Icons.category_rounded, AppColors.danger, '/categories', 'products.manage'),
-  NavItem('Manage Customers', Icons.people_alt_rounded, Color(0xFF3E7D16), '/customers', 'customers.manage'),
-  NavItem('Manage Suppliers', Icons.local_shipping_rounded, AppColors.navy, '/suppliers', 'suppliers.manage'),
-  NavItem('Purchase History', Icons.add_shopping_cart_rounded, AppColors.danger, '/purchases', 'purchases.manage'),
-  NavItem('Settings', Icons.settings_rounded, AppColors.navy, '/settings', 'settings.manage'),
-  NavItem('Printer Settings', Icons.print_rounded, AppColors.blue, '/settings?section=printer', 'settings.manage'),
-  NavItem('Sync Cloud Data', Icons.sync_rounded, AppColors.blueLight, '#sync'),
-  NavItem('Bills History', Icons.receipt_long_rounded, AppColors.blue, '/bills', 'bills.view'),
-  NavItem('Reports & Analytics', Icons.bar_chart_rounded, Color(0xFFE09A00), '/reports', 'reports.view'),
-  NavItem('Stock Management', Icons.fact_check_rounded, Color(0xFF3E7D16), '/stock', 'inventory.view'),
-  NavItem('User Management', Icons.badge_rounded, AppColors.navy, '/users', 'users.manage'),
-  NavItem('Branches', Icons.storefront_rounded, AppColors.blueLight, '/branches', 'branches.manage'),
+  NavItem('New Bill', Icons.point_of_sale_rounded, AppColors.blue, '/pos', ['bills.create']),
+  NavItem('Bills', Icons.receipt_long_rounded, AppColors.blue, '/bills', ['bills.view']),
+  NavItem('Inventory', Icons.inventory_2_rounded, Color(0xFFE09A00), '/inventory', ['products.manage', 'products.edit_limited', 'inventory.view']),
+  NavItem('Purchases', Icons.add_shopping_cart_rounded, AppColors.danger, '/purchases', ['purchases.manage', 'suppliers.manage'], 'purchases'),
+  NavItem('Customers', Icons.people_alt_rounded, Color(0xFF3E7D16), '/customers', ['customers.manage']),
+  NavItem('Reports', Icons.bar_chart_rounded, Color(0xFFE09A00), '/reports', ['reports.view']),
+  NavItem('Settings', Icons.settings_rounded, AppColors.navy, '/settings', ['settings.manage', 'users.manage', 'branches.manage']),
 ];
+
+/// One tab of a [HubScaffold]; hidden unless the user has any of [permissions] (empty = everyone) and the
+/// shop has [feature] on.
+class HubTab {
+  final String id;
+  final String label;
+  final List<String> permissions;
+  final String? feature;
+  final WidgetBuilder builder;
+  const HubTab(this.id, this.label, this.builder, {this.permissions = const [], this.feature});
+
+  bool allowedFor(Session s) => (permissions.isEmpty || permissions.any(s.can)) && (feature == null || (s.shop?.has(feature!) ?? false));
+}
+
+/// A menu area with tabs (Inventory, Purchases, Reports, Settings). Screens inside a tab keep using
+/// [AppScaffold], which then renders without its own app bar. [initial] is the tab id (`?tab=` in the URL);
+/// [embedded] shows just the tab bar + content (Reports inside the POS).
+class HubScaffold extends StatelessWidget {
+  final String title;
+  final List<HubTab> tabs;
+  final String? initial;
+  final bool embedded;
+
+  /// App-bar buttons of the whole area, e.g. its History button.
+  final List<Widget> actions;
+  const HubScaffold({super.key, required this.title, required this.tabs, this.initial, this.embedded = false, this.actions = const []});
+
+  @override
+  Widget build(BuildContext context) {
+    final session = context.watch<Session>();
+    final visible = tabs.where((t) => t.allowedFor(session)).toList();
+    if (visible.isEmpty) return AppScaffold(title: title, body: const EmptyState(icon: Icons.lock_outline, title: 'You do not have access to this area.'));
+    final index = visible.indexWhere((t) => t.id == initial).clamp(0, visible.length - 1);
+    final scroll = visible.length > 3;
+    TabBar bar({Color? label, Color? unselected, Color? indicator}) => TabBar(
+          isScrollable: scroll,
+          tabAlignment: scroll ? TabAlignment.start : null,
+          labelColor: label,
+          unselectedLabelColor: unselected,
+          indicatorColor: indicator,
+          tabs: [for (final t in visible) Tab(text: t.label)],
+        );
+    final view = TabBarView(children: [for (final t in visible) _HubScope(child: Builder(builder: t.builder))]);
+    return DefaultTabController(
+      key: ValueKey('${visible.length}$initial'),
+      length: visible.length,
+      initialIndex: index,
+      child: embedded
+          ? Column(children: [
+              Material(color: Colors.white, child: bar(label: AppColors.blue, unselected: AppColors.muted, indicator: AppColors.blue)),
+              Expanded(child: view),
+            ])
+          : AppScaffold(title: title, actions: actions, bottom: bar(), body: view),
+    );
+  }
+}
+
+/// Marks content shown inside a [HubScaffold] tab.
+class _HubScope extends InheritedWidget {
+  const _HubScope({required super.child});
+  static bool inside(BuildContext context) => context.getInheritedWidgetOfExactType<_HubScope>() != null;
+  @override
+  bool updateShouldNotify(_HubScope oldWidget) => false;
+}
 
 /// Inner-page scaffold: gradient bar, back arrow to the POS, optional actions/tabs.
 class AppScaffold extends StatelessWidget {
@@ -50,6 +114,22 @@ class AppScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Inside a hub tab: the hub owns the app bar; keep this screen's FAB and show its actions in a slim row.
+    if (_HubScope.inside(context)) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        floatingActionButton: fab,
+        body: actions.isEmpty
+            ? body
+            : Column(children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 2, 8, 0),
+                  child: IconTheme(data: const IconThemeData(color: AppColors.navy), child: Row(mainAxisAlignment: MainAxisAlignment.end, children: actions)),
+                ),
+                Expanded(child: body),
+              ]),
+      );
+    }
     return Scaffold(
       appBar: GradientAppBar(
         title: Text(title),
@@ -160,7 +240,7 @@ class AppDrawer extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = context.watch<Session>();
     final productCount = context.watch<Catalog>().products.length;
-    final items = navItems.where((n) => n.permission == null || s.can(n.permission!)).toList();
+    final items = navItems.where((n) => n.allowedFor(s)).toList();
     final exp = s.shop?.subscriptionExpiry;
     final expired = s.plan?['status'] == 'expired';
     return Drawer(
@@ -223,18 +303,7 @@ class AppDrawer extends StatelessWidget {
                 leading: IconTile(n.icon, n.color, size: 34),
                 title: Text(n.label, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
                 trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                  if (n.path == '#sync')
-                    ValueListenableBuilder<int>(
-                      valueListenable: OfflineQueue.pending,
-                      builder: (_, pending, _) => pending == 0
-                          ? const SizedBox.shrink()
-                          : Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
-                              decoration: BoxDecoration(color: AppColors.amber, borderRadius: BorderRadius.circular(8)),
-                              child: Text('$pending', style: const TextStyle(color: AppColors.navy, fontSize: 11, fontWeight: FontWeight.w800)),
-                            ),
-                    ),
-                  if (n.path == '/products' && productCount > 0)
+                  if (n.path == '/inventory' && productCount > 0)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
                       decoration: BoxDecoration(color: AppColors.lime, borderRadius: BorderRadius.circular(8)),
@@ -244,14 +313,26 @@ class AppDrawer extends StatelessWidget {
                 ]),
                 onTap: () {
                   Navigator.pop(context);
-                  if (n.path == '#sync') {
-                    syncCloudData(context);
-                  } else {
-                    context.go(n.path);
-                  }
+                  context.go(n.path);
                 },
               ),
           ]),
+        ),
+        // Offline bills waiting to upload (only while there are some).
+        ValueListenableBuilder<int>(
+          valueListenable: OfflineQueue.pending,
+          builder: (_, pending, _) => pending == 0
+              ? const SizedBox.shrink()
+              : ListTile(
+                  tileColor: AppColors.amber.withValues(alpha: .18),
+                  leading: const Icon(Icons.cloud_upload_outlined, color: AppColors.navy),
+                  title: Text('$pending bill(s) waiting to sync', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                  subtitle: const Text('Tap to upload now', style: TextStyle(fontSize: 11)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    syncCloudData(context);
+                  },
+                ),
         ),
         const Divider(height: 1),
         ListTile(

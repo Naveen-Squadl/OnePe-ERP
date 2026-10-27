@@ -173,15 +173,17 @@ class _OrderContextRow extends StatelessWidget {
             ]),
           ),
         ),
-        const SizedBox(width: 8),
-        card(
-          width: 86,
-          onTap: () => pickTable(context, cart),
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            const Text('Table', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.muted)),
-            Text(cart.tableName ?? 'None', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
-          ]),
-        ),
+        if (context.watch<Session>().shop?.has('tables') ?? false) ...[
+          const SizedBox(width: 8),
+          card(
+            width: 86,
+            onTap: () => pickTable(context, cart),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              const Text('Table', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.muted)),
+              Text(cart.tableName ?? 'None', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
+            ]),
+          ),
+        ],
       ]),
     );
   }
@@ -502,9 +504,10 @@ class _SummaryState extends State<_Summary> {
 
   @override
   Widget build(BuildContext context) {
-    final s = session.shop?.settings;
-    final showKot = (s?.enableKot ?? false) && !cart.isExpense && !cart.isEmpty;
-    final showLoyalty = !cart.isExpense && (s?.enableLoyalty ?? false) && (cart.customer?.loyaltyPoints ?? 0) > 0;
+    final shop = session.shop;
+    final showKot = (shop?.has('kot') ?? false) && !cart.isExpense && !cart.isEmpty;
+    final showLoyalty = !cart.isExpense && (shop?.has('loyalty') ?? false) && (cart.customer?.loyaltyPoints ?? 0) > 0;
+    final showCredit = cart.hasCustomer && (shop?.has('credit') ?? false);
     const light = Color(0xFFC9D6EA);
     final payable = money(cart.payable).replaceAll('.00', '');
     return Padding(
@@ -579,7 +582,7 @@ class _SummaryState extends State<_Summary> {
                 if (showLoyalty) _action(Icons.stars_rounded, 'Points ${cart.customer!.loyaltyPoints.toStringAsFixed(0)}', () => _loyalty(context), selected: cart.loyaltyRedeem > 0),
                 _action(Icons.pause_circle_outline_rounded, 'Hold', () => _saveWaiting(context)),
                 if (showKot) _action(Icons.soup_kitchen_outlined, 'KOT', () => _kot(context)),
-                if (cart.hasCustomer) _action(Icons.account_balance_wallet_outlined, 'Credit', () => cart.setOnCredit(!cart.onCredit), selected: cart.onCredit),
+                if (showCredit) _action(Icons.account_balance_wallet_outlined, 'Credit', () => cart.setOnCredit(!cart.onCredit), selected: cart.onCredit),
               ]),
             ],
             const SizedBox(height: 12),

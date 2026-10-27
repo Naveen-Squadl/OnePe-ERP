@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/api.dart';
+import '../../../core/features.dart';
 import '../../../core/format.dart';
 import '../../../core/theme.dart';
 import '../../../state/session.dart';
@@ -104,7 +105,7 @@ class _AdminScreenState extends State<AdminScreen> {
                       title: Text(s['name'], style: const TextStyle(fontWeight: FontWeight.w700)),
                       subtitle: Text([
                         'Owner: ${s['ownerEmail']}',
-                        '${s['shopType']} • ${s['plan']}',
+                        '${businessTypeLabel(s['shopType'])} • ${s['plan']}',
                         'Users ${s['_count']['users']}/${s['maxUsers']} • Outlets ${s['_count']['branches']}/${s['maxBranches']}',
                         if (exp != null) '${expired ? 'Expired' : 'Expires'} ${dateOnly(exp)}',
                         'Created: ${dateOnly(DateTime.parse(s['createdAt']))}',
@@ -261,12 +262,8 @@ class _ShopDialogState extends State<_ShopDialog> {
                 const SizedBox(height: 8),
                 DropdownButtonFormField(
                   initialValue: _type,
-                  decoration: const InputDecoration(labelText: 'Shop Type'),
-                  items: const [
-                    DropdownMenuItem(value: 'BAKERY', child: Text('Bakery / Restaurant')),
-                    DropdownMenuItem(value: 'RETAIL', child: Text('Retail Store')),
-                    DropdownMenuItem(value: 'DISTRIBUTOR', child: Text('Distributor')),
-                  ],
+                  decoration: const InputDecoration(labelText: 'Business Type'),
+                  items: [for (final t in businessTypes) DropdownMenuItem(value: t.id, child: Text(t.label))],
                   onChanged: (v) => setState(() => _type = v!),
                 ),
                 const SizedBox(height: 8),
@@ -353,8 +350,8 @@ class _SubscriptionDialogState extends State<_SubscriptionDialog> {
             const SizedBox(height: 8),
             DropdownButtonFormField(
               initialValue: type,
-              decoration: const InputDecoration(labelText: 'Shop Type'),
-              items: [for (final t in ['BAKERY', 'RETAIL', 'DISTRIBUTOR', 'PARKING', 'LOGISTICS']) DropdownMenuItem(value: t, child: Text(t))],
+              decoration: const InputDecoration(labelText: 'Business Type'),
+              items: [for (final t in businessTypes) DropdownMenuItem(value: t.id, child: Text(t.label))],
               onChanged: (v) => setState(() => type = v!),
             ),
             const SizedBox(height: 8),
