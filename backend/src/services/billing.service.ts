@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Bill, BillItem, BillKind, BillStatus, PaymentMethod, Prisma, Role } from '@prisma/client';
+import { Bill, BillItem, BillKind, BillStatus, Customer, PaymentMethod, Prisma, Role } from '@prisma/client';
 import { prisma, Tx } from '../lib/prisma';
 import { num, round2, round3 } from '../lib/money';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors';
@@ -138,6 +138,8 @@ async function priceItems(
     const p = i.productId ? byId.get(i.productId) : undefined;
     if (i.productId && !p) throw badRequest(`Product ${i.productId} not found`);
     if (!p && !i.productName) throw badRequest('Ad-hoc item needs a productName');
+    // Archived products can't be sold (offline bills were sold before the archive and still sync).
+    if (p && !p.isActive && !offline) throw badRequest(`${p.name} is archived – restore it in Inventory first`);
     if (p && p.branchScope === 'SPECIFIC' && !p.branches[0]?.enabled) {
       throw badRequest(`${p.name} is not available in current branch`);
     }
@@ -254,14 +256,16 @@ async function revertEffects(tx: Tx, bill: BillWithItems, user: AuthUser | null,
 }
 
 async function resolveCustomer(tx: Tx, shopId: string, input: CheckoutInput) {
+  // Billing an archived customer brings them back (e.g. a returning mobile number).
+  const active = (c: Customer) => (c.isArchived ? tx.customer.update({ where: { id: c.id }, data: { isArchived: false, archivedAt: null } }) : c);
   if (input.customerId) {
     const c = await tx.customer.findFirst({ where: { id: input.customerId, shopId } });
     if (!c) throw notFound('Customer');
-    return c;
+    return active(c);
   }
   if (input.customerPhone) {
     const existing = await tx.customer.findFirst({ where: { shopId, phone: input.customerPhone } });
-    if (existing) return existing;
+    if (existing) return active(existing);
     return tx.customer.create({
       data: { shopId, phone: input.customerPhone, name: input.customerName?.trim() ?? '' },
     });
@@ -317,16 +321,23 @@ export async function checkout(
 
       // Payment
       let received: number;
-      if (input.paymentMethod === PaymentMethod.CREDIT) received = 0;
+      if (input.paymentMethod === PaymentMethod.CREDIT || input.paymentMethod === PaymentMethod.ADVANCE) received = 0;
       else if (input.paymentMethod === PaymentMethod.SPLIT) received = round2(input.cashAmount + input.upiAmount + input.cardAmount);
       else received = input.receivedAmount ?? totals.total;
       if (!customer && input.kind === BillKind.SALE && received < totals.total && input.status === BillStatus.COMPLETED) {
         throw badRequest('Received amount is less than bill total. Select a customer to record the balance as due.');
       }
-      if (!settings.on.credit && customer && input.kind === BillKind.SALE && input.status === BillStatus.COMPLETED && received < totals.total) {
+      const change = customer && !input.giveChange ? 0 : Math.max(0, round2(received - totals.total));
+      // Advance: a customer balance below zero pays (part of) the bill. The rest of any shortfall is credit (due).
+      const paying = customer && input.kind === BillKind.SALE && input.status === BillStatus.COMPLETED;
+      const shortfall = paying ? Math.max(0, round2(totals.total - (received - change))) : 0;
+      const advanceUsed = Math.min(shortfall, Math.max(0, -num(customer?.currentBalance ?? 0)));
+      if (input.paymentMethod === PaymentMethod.ADVANCE && shortfall - advanceUsed > 0.009) {
+        throw badRequest(`Advance is not enough for this bill – collect the remaining ${round2(shortfall - advanceUsed)}.`);
+      }
+      if (!settings.on.credit && shortfall - advanceUsed > 0.009) {
         throw badRequest('Customer credit is turned off for this shop – collect the full amount (Settings → Features).');
       }
-      const change = customer && !input.giveChange ? 0 : Math.max(0, round2(received - totals.total));
 
       if (existing) await tx.billItem.deleteMany({ where: { billId: existing.id } });
 
@@ -350,6 +361,7 @@ export async function checkout(
         totalAmount: totals.total,
         receivedAmount: input.status === BillStatus.COMPLETED ? received : 0,
         changeAmount: input.status === BillStatus.COMPLETED ? change : 0,
+        advanceUsed: round2(advanceUsed),
         paymentMethod: input.paymentMethod,
         cashAmount: input.paymentMethod === PaymentMethod.CASH ? received : input.cashAmount,
         upiAmount: input.paymentMethod === PaymentMethod.UPI ? received : input.upiAmount,
@@ -369,6 +381,10 @@ export async function checkout(
 
       if (bill.status === BillStatus.COMPLETED) {
         await applyEffects(tx, bill, user, settings, 'Bill: ');
+      }
+      const keptAsAdvance = paying ? round2(received - change - totals.total) : 0;
+      if (keptAsAdvance > 0.009) {
+        await logActivity(user, 'payment_received', `₹${keptAsAdvance} change kept as advance on bill ${bill.billNo} for ${customer!.name || customer!.phone}`, { billId: bill.id, customerId: customer!.id }, tx, shopId);
       }
       if (priceChanges.length) {
         await logActivity(user, 'offline_price_difference', `Offline bill ${bill.billNo}: ${priceChanges.join('; ')}`, { billId: bill.id }, tx, shopId);

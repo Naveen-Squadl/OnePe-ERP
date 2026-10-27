@@ -139,6 +139,10 @@ class Customer {
   double get openingBalance => toDouble(raw['openingBalance']);
   double get balance => toDouble(raw['currentBalance']);
 
+  bool get isArchived => raw['isArchived'] == true;
+
+  /// Money the customer paid in advance (balance below zero).
+  double get advance => balance < 0 ? -balance : 0;
   double get loyaltyPoints => toDouble(raw['loyaltyPoints']);
   DateTime? get createdAt => toDate(raw['createdAt']);
 }
@@ -200,6 +204,8 @@ class Bill {
         ];
   double get change => toDouble(raw['changeAmount']);
 
+  /// Part of the total paid from the customer's advance.
+  double get advanceUsed => toDouble(raw['advanceUsed']);
   double? get customerOpening => raw['customerOpeningBal'] == null ? null : toDouble(raw['customerOpeningBal']);
   double? get customerClosing => raw['customerClosingBal'] == null ? null : toDouble(raw['customerClosingBal']);
   String get paymentMethod => raw['paymentMethod'] ?? 'CASH';

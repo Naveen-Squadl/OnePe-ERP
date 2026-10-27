@@ -118,7 +118,7 @@ user plugs in a phone with USB debugging, run `adb devices`, `adb reverse tcp:40
   can be used directly (`Customer.phoneOnly`, created on sync). Checked: backend 5/5 (pricing + optional-name tests),
   temp live Dart test (instant offline checkout, stock deduction, idle gating, customer cache), APK + web build.
 
-### Done – committed & pushed 2026-10-27 (menu & business types · history panels)
+### Done – committed & pushed 2026-10-27 (menu & business types · history panels · customers / suppliers / products)
 - **Menu consolidated** (2026-10-26, user-approved plan): 14 drawer items → 7 areas with tabs (`HubScaffold`):
   Inventory = Products (with stock; "Stock entry" mode = old Stock Levels; per-row Inward Batch) | Categories (tap → Products
   filtered) | Batches & Expiry | Stock History; Purchases = Inwarded | Pending POs | Suppliers; Reports = Overview (dashboard) |
@@ -155,6 +155,72 @@ user plugs in a phone with USB debugging, run `adb devices`, `adb reverse tcp:40
   calendar filter. Checked: backend 7/7 (new history test), analyze clean, temp widget test (panel presets / calendar /
   search / grouping at 360 + 1280 px, buttons present, removed tabs gone). The API must be restarted after adding
   routes – `tsx watch` did not pick them up.
+- **Removed "Recalculate & Sync Balances"** (Customers toolbar + `POST /customers/recalculate`, user decision): balances
+  change in the same transaction as every bill / payment / cancel / restore / return, and editing an opening balance still
+  recalculates that customer (`recalculateCustomerBalance`). Safety net instead: backend test "customer live balance always
+  equals the ledger closing balance" (runs last, over all test customers). Backend 8/8.
+- **Customer opening balance only at creation** (user decision): the form shows it only for a new customer; the API
+  refuses a changed `openingBalance` on edit (400, same value accepted for old clients). `recalculateCustomerBalance`
+  removed (no longer used). Form label "Customer Name" (no "(optional)"; still optional – a mobile is enough).
+  Suppliers still allow editing their opening balance (open question). Backend 9/9.
+- **Customer advance** (2026-10-27, user request; migration `…_customer_advance`: `Bill.advanceUsed`,
+  `CustomerPayment.isRefund`, `PaymentMethod.ADVANCE`). Advance = customer balance below zero.
+  Take: Receive Payment of any amount (dialog says "Receive Advance" / "kept as advance"; ledger "Advance Received").
+  Use: cart **Advance** chip (on by default for a customer with advance, exclusive with Credit) → advance pays first,
+  "From advance −₹x" in the summary, Proceed asks only for the rest (`Cart.advancePart` / `toCollect`); fully covered →
+  method ADVANCE, no payment pop-up; OnePe collect is not offered when an advance is used (the PDF shows the full total).
+  Server computes `advanceUsed` and allows a short-paid bill with customer credit OFF when the advance covers it.
+  Keep change: payment pop-up option "Cash – keep change as advance" (`giveChange: false`). Refund: customer details
+  ⇄ button → `POST /customers/:id/refunds` (≤ advance, REF- receipt, activity `advance_refunded`), "Advance Refunded"
+  in the ledger, refund receipt print. Receipts show "Paid from Advance", "Kept as Advance" and balances below zero as
+  "₹x Advance". Reports: net collection and the outstanding report subtract refunds.
+  Customers list chips: **All · Due · Advance** with "· N · ₹total" (`GET /customers/summary`); Due only when customer
+  credit is on; `filter=advance` (balance < 0). History "Payments & refunds". Checked: backend 10/10 (full advance flow
+  incl. credit off, not-enough advance, keep change, refund limits, ledger wording), analyze clean, temp tests (cart
+  maths, customer detail). DB backed up before the migration (scratchpad before_advance.dump).
+- **Customer screen clean-up** (user feedback): chips are plain **All · Due · Advance** (no counts / amounts;
+  `/customers/summary` removed). Customer details redesigned: one summary card that says the balance in words
+  ("Naveen owes you ₹250" / "Naveen has ₹100 advance with you" / "All settled") with mobile · points · opening and
+  Receive Payment/Advance + Refund Advance buttons (no FAB covering the list); Edit/Delete in a ⋮ menu; "Account
+  statement" rows show type, date, bill/receipt no., "Billed ₹x" / "Paid ₹x" and a balance tag; "Balance now" at the
+  end. No more Dr/Cr or negative numbers: `balanceText()` (format.dart) → "₹250 due" / "₹100 advance" / "Settled",
+  also in the customers list, customer picker and cart. Checked by rendering the screen to PNG in a temporary widget
+  test (Manrope + Material icons, mocked API via `http.runWithClient`) at 360 px and 1280 px – the old screen showed
+  RenderFlex overflow on rows with both billed and paid amounts; the new one renders without errors.
+- **Customers are archived, never deleted** (user decision; migration `…_customer_archive`: `Customer.isArchived` /
+  `archivedAt`; `CustomerPayment → Customer` is now ON DELETE NO ACTION so payment receipts can never disappear with a
+  customer – before, deleting a customer cascaded their receipts and changed past reports). `POST /customers/:id/archive`
+  (also what `DELETE /customers/:id` does now) only with a settled balance (409: collect the due / refund the advance
+  first); `POST /customers/:id/restore`; lists hide archived (`filter=archived` shows them); adding an archived
+  customer's mobile again, or billing it, restores them (opening balance unchanged). App: "Archive Customer" with an
+  explanation, Archived chip, Restore in list rows / detail ⋮ menu, amber "Archived" note with Restore on the detail
+  card. Backend 11/11 (archive rules, reports unchanged, DB refuses deleting a customer with receipts, restore paths).
+- **Opening balance direction**: Add Customer / Supplier asks the amount and, right under it, two buttons side by side
+  **Due | Advance** (`FieldSpec.options` → SegmentedButton in form_dialog) instead of expecting a minus sign.
+  **No helper texts anywhere** (user decision): removed from form fields, Settings (UPI), purchases (location) and
+  number pop-ups (`askNumber` has no helper any more); available loyalty points moved into that pop-up's title.
+  Checked by rendering the dialog at 360 px.
+- **Suppliers archived, never deleted** (migration `…_supplier_archive`: `Supplier.isArchived/archivedAt`,
+  `SupplierPayment → Supplier` ON DELETE NO ACTION). `POST /suppliers/:id/archive` (= `DELETE`) only when settled,
+  `/restore`, `filter=archived`. Suppliers screen: Active / Archived chips, balances in words via `supplierBalanceText`
+  ("You owe ₹x" / "₹x advance paid" / "Settled") instead of "Pending: ₹-x", Archive/Restore in the row menu.
+  Supplier opening balance is still editable after creation (customers: creation only). Backend 12/12.
+- **Products archived, never deleted** (user decision, no migration – archived = `Product.isActive = false`). Before:
+  sold products were silently hidden with no way back, never-sold ones hard-deleted (cascading batches / branch prices).
+  Now `POST /products/:id/archive` (= `DELETE`) and `/restore`, `GET /products?filter=archived`; archived products are
+  not scannable, can't be sold (400 "… is archived – restore it", offline bills exempt), and their barcode can't be
+  reused by a new product (400 pointing to the archived one). Past bills keep their own name / price per line.
+  App: Inventory → Products "Archive" (explains; mentions remaining stock), "Archived" chip with Restore + stock history;
+  the product form's "Active" switch is gone. Backend 13/13.
+- **Archived customers take no payments**: no Receive Payment / Advance / Refund buttons on their details (amber
+  "Archived" note with Restore instead); the API refuses payments and refunds for them (409 "restore them first").
+- **Customers → History = customer events**, not payments: new activity entries `customer_created` (with opening
+  balance), `customer_updated` (what changed, e.g. "name Asha → Asha K"), `customer_imported`, plus archived /
+  restored; `GET /customers/activity` (customers.manage). `GET /customers/payments` removed (payments stay in each
+  customer's account statement and in reports). Backend 13/13.
+  Customer history also lists **advance events**: advance received (payment above the due – `payment_received`
+  entries mentioning "advance", incl. older ones), **change kept as advance** on a bill (now logged by checkout), and
+  advance refunded (`advance_refunded`). Plain payments of dues stay out.
 
 ### Environment
 - Mac LAN IP **192.168.0.31** (it was briefly 192.168.29.39 on 2026-10-26) – always check `ipconfig getifaddr en0`.

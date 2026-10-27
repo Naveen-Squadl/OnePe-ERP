@@ -6,6 +6,7 @@ import '../../../core/theme.dart';
 import '../../../services/device_printer.dart';
 import '../../../services/print_service.dart';
 import '../../../services/printer_config.dart';
+import '../../widgets/common.dart';
 
 /// What to do with a bill after "Proceed".
 enum BillAction {
@@ -22,7 +23,11 @@ enum BillAction {
 class ManualPayment {
   final String method; // CASH / UPI / CARD / SPLIT
   final double cash, upi, card;
-  const ManualPayment(this.method, {this.cash = 0, this.upi = 0, this.card = 0});
+
+  /// Cash handed over when more than the bill and the change stays with the customer as advance.
+  final double? received;
+  final bool keepChange;
+  const ManualPayment(this.method, {this.cash = 0, this.upi = 0, this.card = 0, this.received, this.keepChange = false});
 }
 
 /// A plain option card of the Proceed pop-ups (no highlighted option).
@@ -116,8 +121,9 @@ Widget _dialogFrame(Widget child) => Dialog(
 );
 
 /// OnePe collection off: the cashier confirms the [total] was received by Cash, UPI or Card, or splits
-/// it across them (the split amounts must add up to the total). Returns null when cancelled.
-Future<ManualPayment?> askPaymentReceived(BuildContext context, {required double total, String? customer}) {
+/// it across them (the split amounts must add up to the total). With [keepChangeOption] (a customer is on the
+/// bill) cash above the total can stay with the customer as advance. Returns null when cancelled.
+Future<ManualPayment?> askPaymentReceived(BuildContext context, {required double total, String? customer, bool keepChangeOption = false}) {
   final fields = {for (final k in ['CASH', 'UPI', 'CARD']) k: TextEditingController()};
   var split = false;
   double amount(String k) => double.tryParse(fields[k]!.text.trim()) ?? 0;
@@ -137,6 +143,13 @@ Future<ManualPayment?> askPaymentReceived(BuildContext context, {required double
                 _optionCard(() => Navigator.pop(c, const ManualPayment('UPI')), Icons.qr_code_2_rounded, 'UPI', 'Received ${money(total)} by UPI'),
                 _optionCard(() => Navigator.pop(c, const ManualPayment('CARD')), Icons.credit_card_rounded, 'Card', 'Received ${money(total)} by card'),
                 _optionCard(() => setState(() => split = true), Icons.call_split_rounded, 'Split', 'Part cash, UPI and / or card'),
+                if (keepChangeOption)
+                  _optionCard(() async {
+                    final v = await askNumber(c, 'Cash received', label: 'Amount (₹)', initial: total);
+                    if (v == null || !c.mounted) return;
+                    if (v < total) return showSnack(c, 'Enter at least ${money(total)}', error: true);
+                    Navigator.pop(c, ManualPayment('CASH', received: v, keepChange: true));
+                  }, Icons.savings_outlined, 'Cash – keep change as advance', 'Customer pays more; the extra stays on their account'),
               ],
             ),
           );

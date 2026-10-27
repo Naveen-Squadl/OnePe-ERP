@@ -105,6 +105,54 @@ Future<void> _purchaseItems(BuildContext context, Map<String, dynamic> p) => sho
       ),
     );
 
+/// Customers: customer events – added, edited (what changed), archived, restored, imported – and advances received
+/// or refunded. Plain payments of dues are in each customer's account statement.
+Future<void> showCustomerActivityHistory(BuildContext context) => showHistory(
+      context,
+      title: 'Customer history',
+      exportHeaders: const ['Event', 'Details', 'User'],
+      load: (from, to) async {
+        final list = await Api.instance.get('/customers/activity', {'from': _iso(from), 'to': _iso(to)}) as List;
+        return [
+          for (final a in list)
+            () {
+              final action = a['action'] as String;
+              final (icon, color, label) = switch (action) {
+                'customer_created' => (Icons.person_add_alt_1_rounded, StatusColors.ok, 'Added'),
+                'customer_updated' => (Icons.edit_outlined, AppColors.blue, 'Edited'),
+                'customer_archived' => (Icons.archive_outlined, StatusColors.due, 'Archived'),
+                'customer_restored' => (Icons.unarchive_outlined, StatusColors.ok, 'Restored'),
+                'customer_imported' => (Icons.upload_file_rounded, AppColors.navy, 'Imported'),
+                'payment_received' => (Icons.savings_outlined, StatusColors.ok, 'Advance received'),
+                'advance_refunded' => (Icons.currency_exchange_rounded, StatusColors.due, 'Advance refunded'),
+                _ => (Icons.person_outline_rounded, AppColors.navy, _label(action.replaceFirst('customer_', ''))),
+              };
+              return HistoryEntry(
+                at: DateTime.parse(a['createdAt']).toLocal(),
+                icon: icon,
+                color: color,
+                title: a['description'],
+                subtitle: [label, a['userName']].whereType<String>().join(' • '),
+                exportRow: [label, a['description'], a['userName'] ?? ''],
+              );
+            }(),
+        ];
+      },
+    );
+
+/// One customer: their bills (tap for details) in the period.
+Future<void> showCustomerBillHistory(BuildContext context, Customer c, {Future<void> Function()? onChanged}) => showHistory(
+      context,
+      title: 'Bills • ${c.name}',
+      preset: 'month',
+      exportHeaders: const ['Bill', 'Items', 'Payment', 'Amount', 'Status'],
+      load: (from, to) async {
+        final open = _billOpener(context, onChanged);
+        final list = await Api.instance.get('/customers/${c.id}/bills', {'from': _iso(from), 'to': _iso(to)}) as List;
+        return [for (final e in list) _billEntry(Bill(Map<String, dynamic>.from(e)), open)];
+      },
+    );
+
 /// New Bill (POS): bills of this outlet – today by default.
 Future<void> showBillHistory(BuildContext context) => showHistory(
       context,

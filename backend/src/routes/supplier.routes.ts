@@ -1,11 +1,12 @@
-import { Router } from 'express';
+import { RequestHandler, Router } from 'express';
 import { z } from 'zod';
 import { PaymentMethod, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { dateRange, parse, optStr } from '../lib/validate';
 import { requireFeature } from '../lib/features';
 import { requirePermission, shopIdOf } from '../middleware/auth';
-import { notFound } from '../lib/errors';
+import { conflict, notFound } from '../lib/errors';
+import { num } from '../lib/money';
 import { logActivity } from '../lib/activity';
 
 export const supplierRouter = Router();
@@ -21,6 +22,7 @@ supplierRouter.get('/', async (req, res) => {
   const q = (req.query.q as string | undefined)?.trim();
   const where: Prisma.SupplierWhereInput = {
     shopId: shopIdOf(req),
+    isArchived: req.query.filter === 'archived',
     ...(q && { OR: [{ name: { contains: q, mode: 'insensitive' } }, { phone: { contains: q } }] }),
   };
   res.json(await prisma.supplier.findMany({ where, orderBy: { name: 'asc' } }));
@@ -44,10 +46,29 @@ supplierRouter.put('/:id', async (req, res) => {
   res.json(await prisma.supplier.update({ where: { id: s.id }, data }));
 });
 
-supplierRouter.delete('/:id', async (req, res) => {
+/**
+ * Archive instead of delete: hidden from lists and the purchase form, purchases / payments kept, reports unchanged.
+ * Only with a settled balance – pay what you owe, or use up the advance, first.
+ */
+const archive: RequestHandler = async (req, res) => {
   const s = await own(req);
-  await prisma.supplier.delete({ where: { id: s.id } });
-  res.json({ ok: true });
+  const balance = num(s.currentBalance);
+  if (balance > 0.009) throw conflict(`You owe ${s.name} ₹${balance} – pay or settle it before archiving`);
+  if (balance < -0.009) throw conflict(`${s.name} has ₹${-balance} advance from you – settle it before archiving`);
+  const out = await prisma.supplier.update({ where: { id: s.id }, data: { isArchived: true, archivedAt: new Date() } });
+  await logActivity(req.user!, 'supplier_archived', `Archived supplier ${s.name}`);
+  res.json(out);
+};
+
+supplierRouter.post('/:id/archive', archive);
+/** Older app versions call DELETE – suppliers are never deleted, only archived. */
+supplierRouter.delete('/:id', archive);
+
+supplierRouter.post('/:id/restore', async (req, res) => {
+  const s = await own(req);
+  const out = await prisma.supplier.update({ where: { id: s.id }, data: { isArchived: false, archivedAt: null } });
+  await logActivity(req.user!, 'supplier_restored', `Restored archived supplier ${s.name}`);
+  res.json(out);
 });
 
 /** Supplier payments in a period (Purchases → History). */

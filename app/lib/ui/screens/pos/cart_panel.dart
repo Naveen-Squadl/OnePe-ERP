@@ -135,7 +135,7 @@ class _OrderContextRow extends StatelessWidget {
     final bg = onCard ? Colors.white : AppColors.bg;
     final name = cart.customer?.name ?? (cart.customerPhone != null ? (cart.customerName ?? cart.customerPhone!) : 'Walk-in');
     final sub = cart.customer != null
-        ? 'Balance ${money(cart.customer!.balance)}${cart.customer!.loyaltyPoints > 0 ? ' · ★ ${cart.customer!.loyaltyPoints.toStringAsFixed(0)}' : ''} · Change'
+        ? '${balanceText(cart.customer!.balance)}${cart.customer!.loyaltyPoints > 0 ? ' · ★ ${cart.customer!.loyaltyPoints.toStringAsFixed(0)}' : ''} · Change'
         : 'Search / Add customer';
     Widget card({required Widget child, required VoidCallback onTap, double? width}) => SizedBox(
           width: width,
@@ -275,7 +275,7 @@ class _LineCard extends StatelessWidget {
         Row(children: [
           InkWell(
             onTap: () async {
-              final v = await askNumber(context, 'Apply Item Discount', label: 'Discount Amount (₹)', initial: line.discount, helper: 'Original Total: ${money(line.price * line.quantity)}');
+              final v = await askNumber(context, 'Apply Item Discount', label: 'Discount Amount (₹)', initial: line.discount);
               if (v != null) cart.setItemDiscount(line, v);
             },
             child: Padding(
@@ -398,7 +398,7 @@ class _SummaryState extends State<_Summary> {
 
   Future<void> _loyalty(BuildContext context) async {
     final available = cart.customer?.loyaltyPoints ?? 0;
-    final v = await askNumber(context, 'Redeem Loyalty Points', label: 'Points to Redeem', initial: cart.loyaltyRedeem, helper: 'Available Points: ${available.toStringAsFixed(0)} (1 pt = ₹1)');
+    final v = await askNumber(context, 'Redeem Loyalty Points · ${available.toStringAsFixed(0)} available', label: 'Points to Redeem', initial: cart.loyaltyRedeem);
     if (v != null) cart.setLoyalty(v.clamp(0, available).toDouble());
   }
 
@@ -422,24 +422,30 @@ class _SummaryState extends State<_Summary> {
   Future<void> _pay(BuildContext context) async {
     if (cart.isEmpty) return showSnack(context, 'Your cart is empty', error: true);
     final credit = cart.onCredit && cart.hasCustomer && !cart.isExpense;
-    final collect = PrinterConfig.onePeCollect;
+    // Advance: the customer's advance pays first; only the rest is collected (no OnePe hand-off then, since
+    // the bill PDF shows the full total).
+    final advance = cart.isExpense ? 0.0 : cart.advancePart;
+    final toCollect = cart.toCollect;
+    final fromAdvanceOnly = advance > 0 && toCollect <= 0;
+    final collect = PrinterConfig.onePeCollect && advance == 0;
     final action = await askBillAction(context, total: cart.payable, allowCollect: collect && !credit && !cart.isExpense, customer: cart.customer?.name);
     if (action == null || !context.mounted) return;
     // OnePe collection off: the cashier confirms how the money was received (paid sales only).
     ManualPayment? paid;
-    if (!collect && !credit && !cart.isExpense) {
-      paid = await askPaymentReceived(context, total: cart.payable, customer: cart.customer?.name);
+    if (!collect && !credit && !cart.isExpense && !fromAdvanceOnly) {
+      paid = await askPaymentReceived(context, total: toCollect, customer: cart.customer?.name, keepChangeOption: cart.customer != null);
       if (paid == null || !context.mounted) return;
     }
-    final method = credit ? 'CREDIT' : (action.collects ? 'ONEPE' : paid?.method ?? 'CASH');
+    final method = credit ? 'CREDIT' : fromAdvanceOnly ? 'ADVANCE' : (action.collects ? 'ONEPE' : paid?.method ?? 'CASH');
     final bill = await guard(
       context,
       () => cart.checkout(
         paymentMethod: method,
-        received: credit ? 0 : cart.payable,
+        received: credit || fromAdvanceOnly ? 0 : (paid?.received ?? toCollect),
         cash: paid?.cash ?? 0,
         upi: paid?.upi ?? 0,
         card: paid?.card ?? 0,
+        giveChange: !(paid?.keepChange ?? false),
       ),
     );
     if (bill == null || !context.mounted) return;
@@ -561,6 +567,10 @@ class _SummaryState extends State<_Summary> {
               if (cart.loyaltyDiscount > 0) _row('Loyalty Discount', '-${money(cart.loyaltyDiscount)}', color: AppColors.lime),
               if (cart.roundMode != 'none') _row('Round Off', _signed(cart.roundOff)),
             ],
+            if (cart.advancePart > 0) ...[
+              const SizedBox(height: 6),
+              _row('From advance (${money(cart.advanceAvailable).replaceAll('.00', '')} available)', '-${money(cart.advancePart)}', color: AppColors.lime),
+            ],
             if (!cart.isEmpty && cart.hasPaise) ...[
               const SizedBox(height: 12),
               Container(
@@ -582,6 +592,7 @@ class _SummaryState extends State<_Summary> {
                 if (showLoyalty) _action(Icons.stars_rounded, 'Points ${cart.customer!.loyaltyPoints.toStringAsFixed(0)}', () => _loyalty(context), selected: cart.loyaltyRedeem > 0),
                 _action(Icons.pause_circle_outline_rounded, 'Hold', () => _saveWaiting(context)),
                 if (showKot) _action(Icons.soup_kitchen_outlined, 'KOT', () => _kot(context)),
+                if (cart.advanceAvailable > 0) _action(Icons.savings_outlined, 'Advance', () => cart.setUseAdvance(!cart.useAdvance), selected: cart.useAdvance),
                 if (showCredit) _action(Icons.account_balance_wallet_outlined, 'Credit', () => cart.setOnCredit(!cart.onCredit), selected: cart.onCredit),
               ]),
             ],
@@ -594,7 +605,9 @@ class _SummaryState extends State<_Summary> {
                       ? 'Proceed'
                       : cart.onCredit
                           ? 'Proceed on Credit · $payable'
-                          : 'Proceed · $payable',
+                          : cart.advancePart > 0
+                              ? (cart.toCollect > 0 ? 'Proceed · pay ${money(cart.toCollect).replaceAll('.00', '')}' : 'Proceed · from advance')
+                              : 'Proceed · $payable',
               icon: cart.isExpense ? Icons.receipt_long_rounded : Icons.arrow_forward_rounded,
               busy: cart.busy,
               onPressed: () => _pay(context),

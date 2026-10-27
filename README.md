@@ -81,7 +81,7 @@ cd app && flutter analyze
 | Bills history | waiting/completed tabs, search, date filter, edit (reverts & re-applies stock/balances), cancel, soft delete, restore, permanent delete, print, WhatsApp, PDF export |
 | Offline | bills checked out while offline are queued with a client UUID, auto-synced idempotently (`/sync/push`), and on Android backed up to `Download/OnePe/OfflineBills` (folder granted once → automatic recovery/clean-up); products/categories and photo thumbnails are kept on the device for offline billing |
 | Products & categories | **product photos** (camera / gallery upload, shown on POS cards & lists), barcode auto-generate + label printing, per-branch availability & price, barcode, HSN, GST (CGST/SGST/IGST), stock/expense categories, opening stock with batch & expiry, archive-on-delete, bulk import endpoint |
-| Customers | ledger with opening/running/closing balance, payments with receipts, purchase history, recalculate balances, loyalty points |
+| Customers | ledger with opening/running/closing balance, payments with receipts, bills & payment history, loyalty points |
 | Suppliers & purchases | supplier payables, purchase bills, purchase orders → inward, batches & expiry, margin hints |
 | Stock | per-branch stock, +Qty/−Qty/Set, inward batches, FIFO batch consumption with exact reversal, expiring/expired filters, immutable stock history, customer returns (good/damaged/old stock, cash refund/account credit) |
 | Reports | business summary (gross, discounts, net, expenses, net collection, hourly/day/week/month trend, peak, payment split, top items), sales matrix, customer sales, outstanding, user sales, inventory valuation by location, GST HSN (GSTR-1 Table 12) + slab summary, purchases, branch-wise; PDF export |
@@ -116,7 +116,7 @@ All routes are under `/api`; tenant routes need `Authorization: Bearer <token>` 
 | auth | `POST /auth/login`, `GET /auth/me`, `POST /auth/change-password` |
 | shop/branches/users | `GET/PUT /shop`, `CRUD /branches`, `CRUD /users`, `GET /users/roles` |
 | catalog | `CRUD /categories`, `CRUD /products`, `GET /products/barcode/:code`, `POST /products/import` |
-| customers | `CRUD /customers`, `GET /customers/phone/:phone`, `GET /customers/:id/ledger`, `GET /customers/:id/bills`, `POST /customers/:id/payments`, `POST /customers/recalculate`, `POST /customers/import` |
+| customers | `CRUD /customers`, `GET /customers/phone/:phone`, `GET /customers/:id/ledger`, `GET /customers/:id/bills`, `GET /customers/payments`, `POST /customers/:id/payments`, `POST /customers/import` |
 | bills | `GET /bills`, `GET /bills/:id`, `POST /bills/checkout`, `POST /bills/:id/kot`, `POST /bills/:id/cancel`, `DELETE /bills/:id`, `POST /bills/:id/restore`, `DELETE /bills/:id/permanent` |
 | stock | `GET /stock`, `POST /stock/adjust`, `POST /stock/inward`, `GET /stock/batches`, `GET /stock/history` |
 | purchasing | `CRUD /suppliers`, `POST /suppliers/:id/payments`, `GET/POST /purchases`, `POST /purchases/:id/inward`, `DELETE /purchases/:id`, `GET/POST /returns` |

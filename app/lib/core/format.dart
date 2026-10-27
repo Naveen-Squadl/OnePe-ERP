@@ -12,6 +12,14 @@ String isoDate(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
 double toDouble(dynamic v) => v == null ? 0 : (v is num ? v.toDouble() : double.tryParse(v.toString()) ?? 0);
 DateTime? toDate(dynamic v) => v == null ? null : DateTime.tryParse(v.toString());
 
+/// Customer balance in plain words: above zero the customer owes the shop ("₹250 due"), below zero the shop
+/// holds the customer's money ("₹100 advance"), otherwise "Settled". Never shown as a negative number.
+String balanceText(double v) => v > 0.009 ? '${money(v)} due' : v < -0.009 ? '${money(-v)} advance' : 'Settled';
+
+/// Supplier balance in plain words: above zero the shop owes the supplier ("You owe ₹500"), below zero the shop
+/// has paid in advance ("₹200 advance paid"), otherwise "Settled".
+String supplierBalanceText(double v) => v > 0.009 ? 'You owe ${money(v)}' : v < -0.009 ? '${money(-v)} advance paid' : 'Settled';
+
 /// "Rupees ... Only" (Indian numbering: Lakh / Crore) for A4 invoices.
 String amountInWords(num amount) {
   const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve',

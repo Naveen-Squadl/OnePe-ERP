@@ -361,7 +361,7 @@ class _PurchaseFormState extends State<PurchaseForm> {
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String?>(
                   initialValue: _location,
-                  decoration: const InputDecoration(labelText: 'Storage Location', helperText: 'Manage Locations in Settings'),
+                  decoration: const InputDecoration(labelText: 'Storage Location'),
                   items: [const DropdownMenuItem(value: null, child: Text('Unassigned')), for (final l in locs) DropdownMenuItem(value: l, child: Text(l))],
                   onChanged: (v) => setState(() => _location = v),
                 ),

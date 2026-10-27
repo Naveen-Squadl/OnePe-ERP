@@ -35,6 +35,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
   int _v = 0;
   bool _stockEntry = false;
 
+  /// Showing archived products (restore only).
+  bool _archived = false;
   String _mode = 'add'; // add (Inward) | remove (Outward) | set
   String? _location;
   final Map<String, TextEditingController> _qtyCtrls = {};
@@ -160,7 +162,9 @@ class _ProductsScreenState extends State<ProductsScreen> {
   }
 
   Future<List<Product>> _load() async =>
-      (await Api.instance.get('/products', {'q': _q, 'scope': _scope, 'categoryId': _categoryId}) as List).map((e) => Product(Map<String, dynamic>.from(e))).toList();
+      (await Api.instance.get('/products', {'q': _q, 'scope': _scope, 'categoryId': _categoryId, 'filter': _archived ? 'archived' : null}) as List)
+          .map((e) => Product(Map<String, dynamic>.from(e)))
+          .toList();
 
   Future<void> _open([Product? p]) async {
     if (!_canEdit) return;
@@ -171,10 +175,24 @@ class _ProductsScreenState extends State<ProductsScreen> {
     }
   }
 
-  Future<void> _delete(Product p) async {
-    if (!await confirm(context, 'Delete Product', 'Are you sure you want to delete ${p.name}? Products used in bills are archived instead.', ok: 'Delete', danger: true)) return;
+  /// Archive instead of delete: hidden from billing, lists and pickers; past bills, purchases and stock history keep it.
+  Future<void> _archive(Product p) async {
+    final stockNote = p.trackStock && p.stock > 0 ? '\n\nIt still has ${qty(p.stock)} in stock.' : '';
+    if (!await confirm(context, 'Archive ${p.name}?',
+        'It is hidden from billing, the product list and the purchase form. Past bills, purchases and stock history keep it, and reports do not change. Restore it any time from Archived.$stockNote',
+        ok: 'Archive')) {
+      return;
+    }
     if (!mounted) return;
-    final r = await guard(context, () => Api.instance.delete('/products/${p.id}'), success: 'Product deleted');
+    final r = await guard(context, () => Api.instance.post('/products/${p.id}/archive'), success: '${p.name} archived');
+    if (r != null && mounted) {
+      setState(() => _v++);
+      context.read<Catalog>().load();
+    }
+  }
+
+  Future<void> _restore(Product p) async {
+    final r = await guard(context, () => Api.instance.post('/products/${p.id}/restore'), success: '${p.name} restored');
     if (r != null && mounted) {
       setState(() => _v++);
       context.read<Catalog>().load();
@@ -210,7 +228,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
     final history = showStock && _session.can('inventory.view');
     return AppScaffold(
       title: 'Products',
-      fab: _canManage && !_stockEntry ? FloatingActionButton.extended(onPressed: () => _open(), icon: const Icon(Icons.add), label: const Text('Add Product')) : null,
+      fab: _canManage && !_stockEntry && !_archived ? FloatingActionButton.extended(onPressed: () => _open(), icon: const Icon(Icons.add), label: const Text('Add Product')) : null,
       body: Column(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
@@ -225,13 +243,25 @@ class _ProductsScreenState extends State<ProductsScreen> {
             CategoryChip(label: 'All', color: AppColors.blue, selected: _categoryId == null, onTap: () => setState(() => _categoryId = null)),
             for (final (i, c) in cats.indexed)
               CategoryChip(label: c.name, color: AppColors.forIndex(i), selected: _categoryId == c.id, onTap: () => setState(() => _categoryId = c.id)),
-            if (canStock) ...[
+            if (canStock && !_archived) ...[
               const SizedBox(width: 8),
               FilterChip(
                 avatar: const Icon(Icons.fact_check_rounded, size: 18),
                 label: const Text('Stock entry'),
                 selected: _stockEntry,
                 onSelected: (v) => setState(() => _stockEntry = v),
+              ),
+            ],
+            if (_canManage) ...[
+              const SizedBox(width: 8),
+              FilterChip(
+                avatar: const Icon(Icons.archive_outlined, size: 18),
+                label: const Text('Archived'),
+                selected: _archived,
+                onSelected: (v) => setState(() {
+                  _archived = v;
+                  if (v) _stockEntry = false;
+                }),
               ),
             ],
             if (multiBranch) ...[
@@ -248,13 +278,16 @@ class _ProductsScreenState extends State<ProductsScreen> {
         const Divider(height: 1),
         Expanded(
           child: Loader<List<Product>>(
-            key: ValueKey('$_q$_scope$_categoryId$_v'),
+            key: ValueKey('$_q$_scope$_categoryId$_archived$_v'),
             load: _load,
             builder: (context, all, reload) {
               final list = _stockEntry ? all.where((p) => p.trackStock).toList() : all;
               current = list;
               if (list.isEmpty) {
-                return ListView(children: const [SizedBox(height: 60), EmptyState(icon: Icons.inventory_2_outlined, title: 'No products match your search or filter.')]);
+                return ListView(children: [
+                  const SizedBox(height: 60),
+                  EmptyState(icon: Icons.inventory_2_outlined, title: _archived ? 'No archived products.' : 'No products match your search or filter.'),
+                ]);
               }
               return ListView.separated(
                 padding: const EdgeInsets.fromLTRB(14, 12, 14, 96),
@@ -276,7 +309,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                   return Card(
                     child: InkWell(
                       borderRadius: BorderRadius.circular(14),
-                      onTap: () => _open(p),
+                      onTap: _archived ? null : () => _open(p),
                       child: Padding(
                         padding: const EdgeInsets.all(12),
                         child: Row(children: [
@@ -316,7 +349,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
                           ),
                           if (_stockEntry)
                             _qtyEntry(p)
-                          else if (narrow)
+                          else if (_archived) ...[
+                            if (history && p.trackStock)
+                              RowAction(Icons.history_rounded, AppColors.navy, 'Stock history', () => showStockHistory(context, productId: p.id, productName: p.name)),
+                            RowAction(Icons.unarchive_outlined, AppColors.green, 'Restore', () => _restore(p)),
+                          ] else if (narrow)
                             // Phones: one menu instead of the row buttons so the name keeps its width.
                             PopupMenuButton<String>(
                               tooltip: 'Actions',
@@ -326,7 +363,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                 'history' => showStockHistory(context, productId: p.id, productName: p.name),
                                 'print' => _printLabel(p),
                                 'edit' => _open(p),
-                                _ => _delete(p),
+                                _ => _archive(p),
                               },
                               itemBuilder: (_) => [
                                 if (batches && p.trackStock)
@@ -336,7 +373,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                                 if (barcode) const PopupMenuItem(value: 'print', child: ListTile(leading: Icon(Icons.print), title: Text('Print Barcode'))),
                                 if (_canEdit) const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit, color: AppColors.blue), title: Text('Edit'))),
                                 if (_canManage)
-                                  const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, color: AppColors.danger), title: Text('Delete'))),
+                                  const PopupMenuItem(value: 'archive', child: ListTile(leading: Icon(Icons.archive_outlined, color: AppColors.danger), title: Text('Archive'))),
                               ],
                             )
                           else ...[
@@ -346,7 +383,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                               RowAction(Icons.history_rounded, AppColors.navy, 'Stock history', () => showStockHistory(context, productId: p.id, productName: p.name)),
                             if (barcode) RowAction(Icons.print, AppColors.navy, 'Print Barcode', () => _printLabel(p)),
                             if (_canEdit) RowAction(Icons.edit, AppColors.blue, 'Edit', () => _open(p)),
-                            if (_canManage) RowAction(Icons.delete_outline, AppColors.danger, 'Delete', () => _delete(p)),
+                            if (_canManage) RowAction(Icons.archive_outlined, AppColors.danger, 'Archive', () => _archive(p)),
                           ],
                         ]),
                       ),

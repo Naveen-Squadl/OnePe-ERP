@@ -1,10 +1,11 @@
-import { Router } from 'express';
+import { RequestHandler, Router } from 'express';
 import { z } from 'zod';
 import { BranchScope, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { parse, optStr } from '../lib/validate';
 import { branchIdOf, requirePermission, shopIdOf } from '../middleware/auth';
-import { forbidden, notFound } from '../lib/errors';
+import { badRequest, forbidden, notFound } from '../lib/errors';
+import { logActivity } from '../lib/activity';
 import { num } from '../lib/money';
 import { inwardBatch } from '../services/stock.service';
 
@@ -37,7 +38,8 @@ productRouter.get('/', async (req, res) => {
   if (scope === 'this_branch') and.push({ OR: [{ branchScope: BranchScope.ALL }, { branches: { some: { branchId, enabled: true } } }] });
   const where: Prisma.ProductWhereInput = {
     shopId,
-    isActive: req.query.includeInactive === 'true' ? undefined : true,
+    // Archived products (isActive = false) only with ?filter=archived.
+    isActive: req.query.filter === 'archived' ? false : req.query.includeInactive === 'true' ? undefined : true,
     categoryId: (req.query.categoryId as string) || undefined,
     AND: and,
   };
@@ -110,6 +112,10 @@ productRouter.post('/', requirePermission('products.manage'), async (req, res) =
   const branchId = await branchIdOf(req);
   const body = parse(ProductBody, req.body);
   const { availability, branches: _b, openingStock, batchNumber, expiryDate, ...data } = body;
+  if (data.barcode) {
+    const archived = await prisma.product.findFirst({ where: { shopId, barcode: data.barcode, isActive: false } });
+    if (archived) throw badRequest(`Barcode ${data.barcode} belongs to the archived product "${archived.name}" – restore it from Archived`);
+  }
   const product = await prisma.$transaction(async (tx) => {
     const p = await tx.product.create({
       data: { ...data, barcode: data.barcode || null, shopId, branchScope: availability === 'all_branches' ? BranchScope.ALL : BranchScope.SPECIFIC },
@@ -152,18 +158,28 @@ productRouter.put('/:id', requirePermission('products.manage', 'products.edit_li
   res.json(present(product, branchId));
 });
 
-productRouter.delete('/:id', requirePermission('products.manage'), async (req, res) => {
-  const shopId = shopIdOf(req);
-  const p = await prisma.product.findFirst({ where: { id: req.params.id, shopId } });
+/**
+ * Archive instead of delete: hidden from the POS, lists and pickers; past bills, purchases, stock history and reports
+ * keep it (bill lines store their own name / price). Restore any time from Inventory → Products → Archived.
+ */
+const archive: RequestHandler = async (req, res) => {
+  const p = await prisma.product.findFirst({ where: { id: req.params.id, shopId: shopIdOf(req) } });
   if (!p) throw notFound('Product');
-  const used = await prisma.billItem.count({ where: { productId: p.id } });
-  if (used > 0) {
-    await prisma.product.update({ where: { id: p.id }, data: { isActive: false } });
-    res.json({ ok: true, archived: true });
-    return;
-  }
-  await prisma.product.delete({ where: { id: p.id } });
-  res.json({ ok: true });
+  const out = await prisma.product.update({ where: { id: p.id }, data: { isActive: false } });
+  await logActivity(req.user!, 'product_archived', `Archived product ${p.name}`);
+  res.json(out);
+};
+
+productRouter.post('/:id/archive', requirePermission('products.manage'), archive);
+/** Older app versions call DELETE – products are never deleted, only archived. */
+productRouter.delete('/:id', requirePermission('products.manage'), archive);
+
+productRouter.post('/:id/restore', requirePermission('products.manage'), async (req, res) => {
+  const p = await prisma.product.findFirst({ where: { id: req.params.id, shopId: shopIdOf(req) } });
+  if (!p) throw notFound('Product');
+  const out = await prisma.product.update({ where: { id: p.id }, data: { isActive: true } });
+  await logActivity(req.user!, 'product_restored', `Restored product ${p.name}`);
+  res.json(out);
 });
 
 /** Bulk import (client parses the Excel). Skips rows whose name or barcode already exist. */

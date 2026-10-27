@@ -107,15 +107,17 @@ class PrintService {
           _row('GRAND TOTAL:', _rs(b.total), bold: true, size: 10),
           _row('Payment:', b.paymentLabel),
           for (final (label, amt) in b.splitParts) _row('  $label:', _rs(amt)),
+          if (b.advanceUsed > 0) _row('Paid from Advance:', _rs(b.advanceUsed)),
           if (b.received > 0) _row('Received:', _rs(b.received)),
           if (b.change > 0) _row('Change:', _rs(b.change)),
+          if (b.customerOpening != null && b.received - b.change > b.total) _row('Kept as Advance:', _rs(b.received - b.change - b.total)),
           if (s.showCustomerAccount && b.customerOpening != null) ...[
             _dash(),
             pw.Text('--- Customer Account ---', textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 8)),
-            _row('Opening Balance:', _rs(b.customerOpening!)),
+            _row('Opening Balance:', _bal(b.customerOpening!)),
             _row('Current Bill:', _rs(b.total)),
             _row('Received:', _rs(b.received - b.change)),
-            _row('New Account Balance:', _rs(b.customerClosing ?? 0), bold: true),
+            _row('New Account Balance:', _bal(b.customerClosing ?? 0), bold: true),
             if (b.loyaltyEarned > 0) _row('Points Earned (This Bill):', b.loyaltyEarned.toStringAsFixed(0)),
           ],
           _dash(),
@@ -258,6 +260,10 @@ class PrintService {
     return doc.save();
   }
 
+  /// Customer balance for receipts: below zero is shown as an advance.
+  static String _bal(double v) => v < 0 ? '${_rs(-v)} Advance' : _rs(v);
+
+  /// Payment receipt; also for advances received and advance refunds (`isRefund`).
   static Future<void> printPaymentReceipt(Map<String, dynamic> payment, Customer c, double opening, Shop shop) async {
     await output(await paymentReceiptPdf(payment, c, opening, shop), name: 'Payment_${payment['receiptNo']}', paper: _slipPaper);
   }
@@ -265,22 +271,25 @@ class PrintService {
   static Future<Uint8List> paymentReceiptPdf(Map<String, dynamic> payment, Customer c, double opening, Shop shop, {PaperSize? paper}) {
     final doc = pw.Document();
     final amount = toDouble(payment['amount']);
+    final refund = payment['isRefund'] == true;
+    final closing = refund ? opening + amount : opening - amount;
+    final title = refund ? 'ADVANCE REFUND' : (closing < 0 && opening <= 0 ? 'ADVANCE RECEIPT' : 'PAYMENT RECEIPT');
     doc.addPage(pw.Page(
       pageFormat: (paper ?? _slipPaper).format.copyWith(marginLeft: 6, marginRight: 6),
       build: (_) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
         pw.Text(shop.name, textAlign: pw.TextAlign.center, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11)),
-        pw.Text('PAYMENT RECEIPT', textAlign: pw.TextAlign.center, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9)),
+        pw.Text(title, textAlign: pw.TextAlign.center, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9)),
         _dash(),
         _row('Receipt:', '${payment['receiptNo']}'),
         _row('Date:', dateTime(toDate(payment['createdAt']) ?? DateTime.now())),
         _row('Customer:', c.name),
         _row('Mode:', '${payment['method']}'),
         _dash(),
-        _row('Opening Balance:', _rs(opening)),
-        _row('Amount Received:', _rs(amount), bold: true, size: 10),
-        _row('Current Balance:', _rs(opening - amount), bold: true),
+        _row('Opening Balance:', _bal(opening)),
+        _row(refund ? 'Amount Refunded:' : 'Amount Received:', _rs(amount), bold: true, size: 10),
+        _row('Current Balance:', _bal(closing), bold: true),
         _dash(),
-        pw.Text('Thank you for your payment!', textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 8)),
+        pw.Text(refund ? 'Advance returned to the customer.' : 'Thank you for your payment!', textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 8)),
       ]),
     ));
     return doc.save();
@@ -303,13 +312,14 @@ class PrintService {
     if (b.loyaltyRedeemed > 0) buf.writeln('Points Redeemed: Rs. ${b.loyaltyRedeemed.toStringAsFixed(2)}');
     if (b.roundOff != 0) buf.writeln('Round Off: ${b.roundOff > 0 ? '+' : '-'}Rs. ${b.roundOff.abs().toStringAsFixed(2)}');
     buf.writeln('*TOTAL: Rs. ${b.total.toStringAsFixed(2)}*');
+    if (b.advanceUsed > 0) buf.writeln('Paid from advance: Rs. ${b.advanceUsed.toStringAsFixed(2)}');
     buf.writeln('Paid: Rs. ${(b.received - b.change).toStringAsFixed(2)}');
     if (b.customerClosing != null) {
       buf
         ..writeln('---\n*CUSTOMER ACCOUNT*')
-        ..writeln('Prev. Outstanding: Rs. ${(b.customerOpening ?? 0).toStringAsFixed(2)}')
+        ..writeln('Prev. Balance: ${_bal(b.customerOpening ?? 0)}')
         ..writeln('Current Bill: Rs. ${b.total.toStringAsFixed(2)}')
-        ..writeln('*Closing Balance: Rs. ${b.customerClosing!.toStringAsFixed(2)}*');
+        ..writeln('*Closing Balance: ${_bal(b.customerClosing!)}*');
     }
     if (b.userName != null) buf.writeln('*Billed by: ${b.userName}*');
     buf.writeln('\n_${shop.thanksNote ?? 'Thank you!'}_');

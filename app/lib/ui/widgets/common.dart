@@ -195,7 +195,7 @@ class StatTile extends StatelessWidget {
 }
 
 /// Labelled number input used in many dialogs.
-Future<double?> askNumber(BuildContext context, String title, {String label = 'Amount', double? initial, String? helper}) async {
+Future<double?> askNumber(BuildContext context, String title, {String label = 'Amount', double? initial}) async {
   final ctrl = TextEditingController(text: initial == null ? '' : initial.toString());
   return showDialog<double>(
     context: context,
@@ -205,7 +205,7 @@ Future<double?> askNumber(BuildContext context, String title, {String label = 'A
         controller: ctrl,
         autofocus: true,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        decoration: InputDecoration(labelText: label, helperText: helper),
+        decoration: InputDecoration(labelText: label),
         onSubmitted: (v) => Navigator.pop(c, double.tryParse(v)),
       ),
       actions: [

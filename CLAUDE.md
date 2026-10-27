@@ -82,6 +82,9 @@ The phone talks to the **API**, never to Postgres directly.
 - Menu (`navItems` in app_shell.dart): New Bill, Bills, Inventory, Purchases, Customers, Reports, Settings. Related screens are tabs
   (`HubScaffold` + `HubTab`, `?tab=` in the URL; tabs hidden by permission); a screen's `AppScaffold` inside a hub tab renders
   without its own app bar. Old paths (/products, /stock, /users…) redirect to the matching tab.
+- Customer balance > 0 = due, < 0 = **advance**. Bills can be paid from the advance (`Bill.advanceUsed`, method ADVANCE when
+  fully covered; server computes it in checkout), change can be kept as advance (`giveChange: false`), advances are
+  refunded with `CustomerPayment.isRefund` (counts as money out in reports). Opening balance is set only at creation.
 - History: no history tabs – a 🕘 `HistoryButton` at the top of a page opens `showHistory` (`widgets/history_panel.dart`,
   date presets + calendar range, search, PDF); per-page loaders live in `ui/history_sources.dart`.
 - **Business type → features**: `backend/src/lib/features.ts` (mirror `app/lib/core/features.dart`, change both): tables, kot, stock,

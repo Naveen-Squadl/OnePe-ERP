@@ -60,7 +60,8 @@ export async function businessSummary(f: ReportFilter, bucket: Bucket | 'auto' =
   const discounts = round2(sales.reduce((s, x) => s + num(x.itemDiscount) + num(x.discount) + num(x.loyaltyPointsRedeemed), 0));
   const net = round2(sales.reduce((s, x) => s + num(x.totalAmount), 0));
   const exp = round2(expenses.reduce((s, x) => s + num(x.totalAmount), 0));
-  const collected = round2(sales.reduce((s, x) => s + num(x.receivedAmount) - num(x.changeAmount), 0) + payments.reduce((s, p) => s + num(p.amount), 0));
+  // Money in: received on sales + customer payments − advances refunded.
+  const collected = round2(sales.reduce((s, x) => s + num(x.receivedAmount) - num(x.changeAmount), 0) + payments.reduce((s, p) => s + (p.isRefund ? -1 : 1) * num(p.amount), 0));
 
   const byMethod: Record<string, number> = {};
   for (const x of sales) {
@@ -164,10 +165,12 @@ export async function customerOutstanding(shopId: string, filter: 'all' | 'due' 
       where: { shopId, customerId: { in: ids }, kind: BillKind.SALE, status: BillStatus.COMPLETED, isCancelled: false, isDeleted: false },
       _sum: { totalAmount: true, receivedAmount: true, changeAmount: true },
     }),
-    prisma.customerPayment.groupBy({ by: ['customerId'], where: { shopId, customerId: { in: ids } }, _sum: { amount: true } }),
+    prisma.customerPayment.groupBy({ by: ['customerId', 'isRefund'], where: { shopId, customerId: { in: ids } }, _sum: { amount: true } }),
   ]);
   const billed = new Map(billAgg.map((b) => [b.customerId, b._sum]));
-  const paid = new Map(payAgg.map((p) => [p.customerId, num(p._sum.amount)]));
+  // Payments in minus advances refunded.
+  const paid = new Map<string, number>();
+  for (const p of payAgg) paid.set(p.customerId, (paid.get(p.customerId) ?? 0) + (p.isRefund ? -1 : 1) * num(p._sum.amount));
   const rows = customers
     .map((c) => {
       const b = billed.get(c.id);

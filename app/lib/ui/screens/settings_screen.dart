@@ -95,9 +95,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       );
 
-  Widget _field(TextEditingController c, String label, {bool enabled = true, String? helper}) => Padding(
+  Widget _field(TextEditingController c, String label, {bool enabled = true}) => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        child: TextField(controller: c, enabled: enabled, decoration: InputDecoration(labelText: label, helperText: helper)),
+        child: TextField(controller: c, enabled: enabled, decoration: InputDecoration(labelText: label)),
       );
 
   Future<void> _editList(String key, String title, String hint) async {
@@ -175,7 +175,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _field(_address, 'Address'),
             _field(_contact, 'Contact Number'),
             _field(_gst, 'GSTIN'),
-            _field(_upi, 'UPI ID (Optional)', enabled: _isAdmin, helper: _isAdmin ? 'For UPI QR code payments' : 'Only Admins can change UPI ID'),
+            _field(_upi, 'UPI ID (Optional)', enabled: _isAdmin),
           ]),
           _saveButton,
         ]),

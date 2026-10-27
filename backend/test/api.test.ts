@@ -297,16 +297,171 @@ test('business type features: defaults, admin switches, enforcement', async () =
   assert.deepEqual([shop.features.purchases, shop.features.credit], [true, false]); // earlier switches kept
 });
 
-test('history panels: dated lists of supplier payments and shop activity', async () => {
+test('history panels: dated lists of payments, activity and customer bills', async () => {
   const today = new Date();
   const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
   const end = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59).toISOString();
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString();
+
+  // Customers → History: customer events only (added / edited …), not payments.
+  const asha = (await api('/customers?q=9123456789', admin)).json[0];
+  await api(`/customers/${asha.id}`, admin, { method: 'PUT', body: { name: 'Asha K' } });
+  const events = (await api(`/customers/activity?from=${start}&to=${end}`, admin)).json;
+  assert.ok(events.some((e: any) => e.action === 'customer_updated' && /name Asha → Asha K/.test(e.description)), JSON.stringify(events));
+  assert.ok(events.every((e: any) => e.action.startsWith('customer_') || /advance/i.test(e.description)));
+  assert.equal((await api(`/customers/activity?from=2000-01-01&to=2000-01-02`, admin)).json.length, 0);
 
   const sup = (await api(`/suppliers/payments?from=${start}&to=${end}`, admin)).json;
   assert.ok(Array.isArray(sup));
-  assert.equal((await api(`/suppliers/payments?from=2000-01-01&to=2000-01-02`, admin)).json.length, 0);
 
   const activity = (await api(`/shop/activity?from=${start}&to=${end}`, admin)).json;
   assert.ok(activity.some((a: any) => a.action === 'bill_cancelled'));
-  assert.equal((await api(`/shop/activity?from=2000-01-01&to=2000-01-02`, admin)).json.length, 0);
+
+  const customer = asha.id;
+  assert.ok((await api(`/customers/${customer}/bills?from=${start}&to=${end}`, admin)).json.length >= 1);
+  assert.equal((await api(`/customers/${customer}/bills?from=2000-01-01&to=${yesterday.slice(0, 4)}-01-01`, admin)).json.length, 0);
+});
+
+test('opening balance is set only when a customer is created', async () => {
+  const c = (await api('/customers', admin, { body: { name: 'Opening Test', phone: '9000000009', openingBalance: 250 } })).json;
+  assert.deepEqual([c.openingBalance, c.currentBalance], [250, 250]);
+  const change = await api(`/customers/${c.id}`, admin, { method: 'PUT', body: { name: 'Renamed', openingBalance: 999 } });
+  assert.equal(change.status, 400);
+  assert.match(change.json.error, /only be set when the customer is created/);
+  const edit = await api(`/customers/${c.id}`, admin, { method: 'PUT', body: { name: 'Renamed', openingBalance: 250 } }); // unchanged value is fine
+  assert.equal(edit.status, 200);
+  assert.deepEqual([edit.json.name, edit.json.openingBalance, edit.json.currentBalance], ['Renamed', 250, 250]);
+});
+
+test('customer advance: take, use (full / part / with credit off), keep change, refund', async () => {
+  // The shop is Services with customer credit switched off at this point (earlier test) – advances must still work.
+  const svc = (await api('/products', admin, { body: { name: `Spa ${tag}`, basePrice: 300, trackStock: false } })).json;
+  const c = (await api('/customers', admin, { body: { name: 'Advance Test', phone: '9000000010' } })).json;
+  const bal = async () => (await api(`/customers/${c.id}`, admin)).json.currentBalance;
+
+  await api(`/customers/${c.id}/payments`, admin, { body: { amount: 500, method: 'UPI' } });
+  assert.equal(await bal(), -500);
+  assert.ok((await api('/customers?filter=advance', admin)).json.some((x: any) => x.id === c.id));
+
+  // Fully from advance.
+  const b1 = (await api('/bills/checkout', admin, { body: { id: randomUUID(), customerId: c.id, items: [{ productId: svc.id, quantity: 1 }], paymentMethod: 'ADVANCE' } })).json;
+  assert.deepEqual([b1.advanceUsed, b1.receivedAmount, b1.paymentMethod], [300, 0, 'ADVANCE']);
+  assert.equal(await bal(), -200);
+  // Not enough advance for a full ADVANCE bill.
+  const short = await api('/bills/checkout', admin, { body: { id: randomUUID(), customerId: c.id, items: [{ productId: svc.id, quantity: 1 }], paymentMethod: 'ADVANCE' } });
+  assert.equal(short.status, 400);
+  assert.match(short.json.error, /collect the remaining 100/);
+  // Part advance + cash (credit is off: allowed because the advance covers the rest).
+  const b2 = (await api('/bills/checkout', admin, { body: { id: randomUUID(), customerId: c.id, items: [{ productId: svc.id, quantity: 1 }], paymentMethod: 'CASH', receivedAmount: 100, giveChange: false } })).json;
+  assert.deepEqual([b2.advanceUsed, b2.receivedAmount], [200, 100]);
+  assert.equal(await bal(), 0);
+  // Credit off and no advance left → short payment refused.
+  const due = await api('/bills/checkout', admin, { body: { id: randomUUID(), customerId: c.id, items: [{ productId: svc.id, quantity: 1 }], paymentMethod: 'CASH', receivedAmount: 100, giveChange: false } });
+  assert.equal(due.status, 400);
+  // Keep change as advance.
+  await api('/bills/checkout', admin, { body: { id: randomUUID(), customerId: c.id, items: [{ productId: svc.id, quantity: 1 }], paymentMethod: 'CASH', receivedAmount: 500, giveChange: false } });
+  assert.equal(await bal(), -200);
+
+  // Refund part of the advance; more than available is refused.
+  const ref = await api(`/customers/${c.id}/refunds`, admin, { body: { amount: 150, method: 'CASH' } });
+  assert.equal(ref.status, 201, JSON.stringify(ref.json));
+  assert.match(ref.json.payment.receiptNo, /^REF-/);
+  assert.equal(await bal(), -50);
+  assert.equal((await api(`/customers/${c.id}/refunds`, admin, { body: { amount: 100 } })).status, 400);
+
+  const ledger = (await api(`/customers/${c.id}/ledger`, admin)).json;
+  const text = ledger.entries.map((e: any) => e.description).join(' | ');
+  assert.match(text, /Advance Received \(UPI\)/);
+  assert.match(text, /₹300 paid from advance/);
+  assert.match(text, /₹200 kept as advance/);
+  assert.match(text, /Advance Refunded \(CASH\)/);
+  assert.equal(ledger.closing, -50);
+
+  // Customers → History lists the advance events (not plain payments of dues).
+  const events = (await api('/customers/activity', admin)).json.map((e: any) => e.description).join(' | ');
+  assert.match(events, /Advance of ₹500 received via UPI from Advance Test/);
+  assert.match(events, /₹200 change kept as advance on bill .* for Advance Test/);
+  assert.match(events, /Advance of ₹150 refunded via CASH to Advance Test/);
+});
+
+test('customers are archived, never deleted', async () => {
+  const today = new Date();
+  const range = `from=${new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString()}&to=${new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59).toISOString()}`;
+  const c = (await api('/customers', admin, { body: { name: 'Archive Test', phone: '9000000020' } })).json;
+  // Advance → refused; refund it, then archiving works.
+  await api(`/customers/${c.id}/payments`, admin, { body: { amount: 80, method: 'CASH' } });
+  const refused = await api(`/customers/${c.id}/archive`, admin, { body: {} });
+  assert.equal(refused.status, 409);
+  assert.match(refused.json.error, /advance – refund it/);
+  await api(`/customers/${c.id}/refunds`, admin, { body: { amount: 80 } });
+  const before = (await api(`/reports/summary?${range}`, admin)).json.netCollection;
+  assert.equal((await api(`/customers/${c.id}`, admin, { method: 'DELETE' })).json.isArchived, true); // DELETE archives
+  assert.ok(!(await api('/customers', admin)).json.some((x: any) => x.id === c.id));
+  assert.ok((await api('/customers?filter=archived', admin)).json.some((x: any) => x.id === c.id));
+  assert.equal((await api(`/reports/summary?${range}`, admin)).json.netCollection, before); // receipts kept
+  assert.equal((await api(`/customers/${c.id}/ledger`, admin)).json.entries.length, 2);
+  // The database refuses to delete a customer that has payment receipts.
+  await assert.rejects(prisma.customer.delete({ where: { id: c.id } }));
+
+  // Restore explicitly, archive again, then adding the same mobile brings the customer back.
+  assert.equal((await api(`/customers/${c.id}/restore`, admin, { body: {} })).json.isArchived, false);
+  await api(`/customers/${c.id}/archive`, admin, { body: {} });
+  assert.equal((await api(`/customers/${c.id}/payments`, admin, { body: { amount: 10 } })).status, 409); // archived: no payments
+  const again = await api('/customers', admin, { body: { name: 'Archive Test Again', phone: '9000000020', openingBalance: 999 } });
+  assert.equal(again.status, 200);
+  assert.deepEqual([again.json.id, again.json.isArchived, again.json.openingBalance, again.json.name], [c.id, false, 0, 'Archive Test Again']);
+  assert.equal((await api('/customers', admin, { body: { phone: '9000000020' } })).status, 400); // active duplicate
+  // Billing an archived customer's mobile also brings them back.
+  await api(`/customers/${c.id}/archive`, admin, { body: {} });
+  const svc = (await api('/products', admin, { body: { name: `Wash ${tag}`, basePrice: 50, trackStock: false } })).json;
+  await api('/bills/checkout', admin, { body: { id: randomUUID(), customerPhone: '9000000020', items: [{ productId: svc.id, quantity: 1 }], paymentMethod: 'CASH', receivedAmount: 50 } });
+  assert.equal((await api(`/customers/${c.id}`, admin)).json.isArchived, false);
+});
+
+test('suppliers are archived, never deleted', async () => {
+  const s = (await api('/suppliers', admin, { body: { name: `Archive Supplier ${tag}`, openingBalance: 100 } })).json;
+  const refused = await api(`/suppliers/${s.id}/archive`, admin, { body: {} });
+  assert.equal(refused.status, 409);
+  assert.match(refused.json.error, /You owe .* ₹100/);
+  await api(`/suppliers/${s.id}/payments`, admin, { body: { amount: 100, method: 'CASH' } });
+  assert.equal((await api(`/suppliers/${s.id}`, admin, { method: 'DELETE' })).json.isArchived, true); // DELETE archives
+  assert.ok(!(await api('/suppliers', admin)).json.some((x: any) => x.id === s.id));
+  assert.ok((await api('/suppliers?filter=archived', admin)).json.some((x: any) => x.id === s.id));
+  await assert.rejects(prisma.supplier.delete({ where: { id: s.id } })); // payments keep it
+  assert.equal((await api(`/suppliers/${s.id}/restore`, admin, { body: {} })).json.isArchived, false);
+});
+
+test('products are archived, never deleted; past bills keep them', async () => {
+  const p = (await api('/products', admin, { body: { name: `Archive Item ${tag}`, basePrice: 40, barcode: `AR${tag}`, trackStock: false } })).json;
+  const sold = (await api('/bills/checkout', admin, { body: { id: randomUUID(), items: [{ productId: p.id, quantity: 1 }], paymentMethod: 'CASH', receivedAmount: 40 } })).json;
+  assert.equal((await api(`/products/${p.id}`, admin, { method: 'DELETE' })).json.isActive, false); // DELETE archives
+  assert.ok(await prisma.product.findUnique({ where: { id: p.id } }), 'product row kept');
+  assert.ok(!(await api('/products', admin)).json.some((x: any) => x.id === p.id));
+  assert.ok((await api('/products?filter=archived', admin)).json.some((x: any) => x.id === p.id));
+  assert.equal((await api(`/products/barcode/AR${tag}`, admin)).status, 404); // not scannable
+  assert.equal((await api(`/bills/${sold.id}`, admin)).json.items[0].productName, `Archive Item ${tag}`); // past bill intact
+  const blocked = await api('/bills/checkout', admin, { body: { id: randomUUID(), items: [{ productId: p.id, quantity: 1 }], paymentMethod: 'CASH', receivedAmount: 40 } });
+  assert.equal(blocked.status, 400);
+  assert.match(blocked.json.error, /is archived/);
+  const reuse = await api('/products', admin, { body: { name: 'Other', basePrice: 1, barcode: `AR${tag}` } });
+  assert.equal(reuse.status, 400);
+  assert.match(reuse.json.error, /belongs to the archived product/);
+  // A never-sold product is archived too (not deleted), and restore brings it back.
+  const unsold = (await api('/products', admin, { body: { name: `Unsold ${tag}`, basePrice: 5, trackStock: false } })).json;
+  await api(`/products/${unsold.id}/archive`, admin, { body: {} });
+  assert.ok(await prisma.product.findUnique({ where: { id: unsold.id } }));
+  assert.equal((await api(`/products/${p.id}/restore`, admin, { body: {} })).json.isActive, true);
+  assert.equal((await api('/bills/checkout', admin, { body: { id: randomUUID(), items: [{ productId: p.id, quantity: 1 }], paymentMethod: 'CASH', receivedAmount: 40 } })).status, 201);
+});
+
+// Runs last: after the bills, payments, cancels, restores and returns above, every customer's stored live balance
+// must equal the closing balance of their ledger (the balance is updated in the same transaction as each change).
+test('customer live balance always equals the ledger closing balance', async () => {
+  const customers = (await api('/customers', admin)).json;
+  assert.ok(customers.length >= 3, `expected test customers, got ${customers.length}`);
+  for (const c of customers) {
+    const ledger = (await api(`/customers/${c.id}/ledger`, admin)).json;
+    assert.equal(c.currentBalance, ledger.closing, `${c.name || c.phone}: live ${c.currentBalance} vs ledger ${ledger.closing}`);
+  }
+  assert.equal((await api('/customers/recalculate', admin, { body: {} })).status, 404); // repair endpoint removed
 });

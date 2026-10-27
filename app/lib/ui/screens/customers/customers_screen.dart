@@ -7,10 +7,12 @@ import '../../../core/theme.dart';
 import '../../../models/models.dart';
 import '../../../services/print_service.dart';
 import '../../../state/session.dart';
+import '../../history_sources.dart';
 import '../../widgets/app_shell.dart';
 import '../../widgets/brand.dart';
 import '../../widgets/common.dart';
 import '../../widgets/form_dialog.dart';
+import '../../widgets/history_panel.dart';
 import '../bills/bills_screen.dart';
 
 class CustomersScreen extends StatefulWidget {
@@ -24,21 +26,20 @@ class _CustomersScreenState extends State<CustomersScreen> {
   String _filter = 'all';
   int _v = 0;
 
+  /// All · Due (only with customer credit on) · Advance.
+  Widget _chips(bool credit) {
+    if (!credit && _filter == 'due') _filter = 'all';
+    return Wrap(spacing: 6, children: [
+      for (final (id, label) in [('all', 'All'), if (credit) ('due', 'Due'), ('advance', 'Advance'), ('archived', 'Archived')])
+        ChoiceChip(label: Text(label), selected: _filter == id, onSelected: (_) => setState(() => _filter = id)),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) => AppScaffold(
         title: 'Customer Management',
         actions: [
-          IconButton(
-            tooltip: 'Recalculate & Sync Balances',
-            onPressed: () async {
-              final r = await guard(context, () => Api.instance.post('/customers/recalculate'));
-              if (r != null && context.mounted) {
-                showSnack(context, 'Recalculated ${r['recalculated']} customer balances');
-                setState(() => _v++);
-              }
-            },
-            icon: const Icon(Icons.calculate_outlined),
-          ),
+          HistoryButton(tooltip: 'Customer history', onPressed: () => showCustomerActivityHistory(context)),
         ],
         fab: FloatingActionButton.extended(
           onPressed: () async {
@@ -52,13 +53,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
             child: SearchField(hint: 'Search by customer name, phone number, GSTIN...', onChanged: (v) => setState(() => _q = v)),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Wrap(spacing: 6, children: [
-              for (final f in const [('all', 'All Customers'), ('due', 'Balance Due Only'), ('settled', 'Settled / Advance')])
-                ChoiceChip(label: Text(f.$2), selected: _filter == f.$1, onSelected: (_) => setState(() => _filter = f.$1)),
-            ]),
-          ),
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: _chips(context.watch<Session>().shop?.has('credit') ?? false)),
           Expanded(
             child: Loader<List<Customer>>(
               key: ValueKey('$_q$_filter$_v'),
@@ -117,31 +112,37 @@ class _CustomersScreenState extends State<CustomersScreen> {
                                           open(tab: 1);
                                         case 'edit':
                                           if (await editCustomer(context, c)) setState(() => _v++);
-                                        case 'delete':
-                                          if (await confirm(context, 'Delete Customer', 'Delete ${c.name}? Their bills stay in history.', danger: true, ok: 'Delete') && context.mounted) {
-                                            final r = await guard(context, () => Api.instance.delete('/customers/${c.id}'));
-                                            if (r != null) setState(() => _v++);
-                                          }
+                                        case 'archive':
+                                          if (await archiveCustomer(context, c)) setState(() => _v++);
+                                        case 'restore':
+                                          if (await restoreCustomer(context, c)) setState(() => _v++);
                                       }
                                     },
-                                    itemBuilder: (_) => const [
-                                      PopupMenuItem(value: 'pay', child: ListTile(leading: Icon(Icons.account_balance_wallet, color: AppColors.orange), title: Text('Receive Payment'))),
-                                      PopupMenuItem(value: 'history', child: ListTile(leading: Icon(Icons.history, color: AppColors.blue), title: Text('Purchase History'))),
-                                      PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit), title: Text('Edit Customer'))),
-                                      PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete_outline, color: AppColors.danger), title: Text('Delete Customer'))),
+                                    itemBuilder: (_) => [
+                                      if (!c.isArchived) ...const [
+                                        PopupMenuItem(value: 'pay', child: ListTile(leading: Icon(Icons.account_balance_wallet, color: AppColors.orange), title: Text('Receive Payment'))),
+                                        PopupMenuItem(value: 'history', child: ListTile(leading: Icon(Icons.history, color: AppColors.blue), title: Text('Bill History'))),
+                                        PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit), title: Text('Edit Customer'))),
+                                        PopupMenuItem(value: 'archive', child: ListTile(leading: Icon(Icons.archive_outlined, color: AppColors.danger), title: Text('Archive Customer'))),
+                                      ] else ...const [
+                                        PopupMenuItem(value: 'history', child: ListTile(leading: Icon(Icons.history, color: AppColors.blue), title: Text('Bill History'))),
+                                        PopupMenuItem(value: 'restore', child: ListTile(leading: Icon(Icons.unarchive_outlined, color: AppColors.green), title: Text('Restore Customer'))),
+                                      ],
                                     ],
                                   )
-                                else ...[
+                                else if (c.isArchived) ...[
+                                  RowAction(Icons.history, AppColors.blue, 'Bill History', () => open(tab: 1)),
+                                  RowAction(Icons.unarchive_outlined, AppColors.green, 'Restore Customer', () async {
+                                    if (await restoreCustomer(context, c)) setState(() => _v++);
+                                  }),
+                                ] else ...[
                                   RowAction(Icons.account_balance_wallet, AppColors.orange, 'Receive Payment', () => open(pay: true)),
-                                  RowAction(Icons.history, AppColors.blue, 'Purchase History', () => open(tab: 1)),
+                                  RowAction(Icons.history, AppColors.blue, 'Bill History', () => open(tab: 1)),
                                   RowAction(Icons.edit, AppColors.green, 'Edit Customer', () async {
                                     if (await editCustomer(context, c)) setState(() => _v++);
                                   }),
-                                  RowAction(Icons.delete_outline, AppColors.danger, 'Delete Customer', () async {
-                                    if (await confirm(context, 'Delete Customer', 'Delete ${c.name}? Their bills stay in history.', danger: true, ok: 'Delete') && context.mounted) {
-                                      final r = await guard(context, () => Api.instance.delete('/customers/${c.id}'));
-                                      if (r != null) setState(() => _v++);
-                                    }
+                                  RowAction(Icons.archive_outlined, AppColors.danger, 'Archive Customer', () async {
+                                    if (await archiveCustomer(context, c)) setState(() => _v++);
                                   }),
                                 ],
                               ]),
@@ -162,17 +163,40 @@ class _BalanceText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final due = balance > 0.009;
-    final color = due ? AppColors.danger : AppColors.green;
+    final color = due ? AppColors.danger : (balance < -0.009 ? AppColors.green : AppColors.muted);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(color: color.withValues(alpha: .08), borderRadius: BorderRadius.circular(6), border: Border.all(color: color.withValues(alpha: .4))),
       child: Text(
-        due ? 'Due: ${money(balance)}' : balance < -0.009 ? 'Advance: ${money(-balance)}' : 'Balance: ₹0.00',
+        balanceText(balance),
         style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: color),
       ),
     );
   }
 }
+
+/// Archive instead of delete: only with a settled balance; bills, payments and history are kept.
+/// Returns true when archived.
+Future<bool> archiveCustomer(BuildContext context, Customer c) async {
+  if (c.balance > 0.009) {
+    showSnack(context, '${c.name} owes you ${money(c.balance)} – collect or settle it before archiving', error: true);
+    return false;
+  }
+  if (c.advance > 0.009) {
+    showSnack(context, '${c.name} has ${money(c.advance)} advance – refund it before archiving', error: true);
+    return false;
+  }
+  if (!await confirm(context, 'Archive ${c.name}?',
+          'They are hidden from the customer list and search. Their bills, payments and account history are kept, and reports do not change.\n\nRestore them any time from the Archived filter – adding or billing the same mobile number also brings them back.',
+          ok: 'Archive') ||
+      !context.mounted) {
+    return false;
+  }
+  return await guard(context, () => Api.instance.post('/customers/${c.id}/archive'), success: '${c.name} archived') != null;
+}
+
+Future<bool> restoreCustomer(BuildContext context, Customer c) async =>
+    await guard(context, () => Api.instance.post('/customers/${c.id}/restore'), success: '${c.name} restored') != null;
 
 /// Add / edit customer dialog. Returns true when saved.
 Future<bool> editCustomer(BuildContext context, [Customer? c]) async => await customerForm(context, c: c) != null;
@@ -181,11 +205,15 @@ Future<bool> editCustomer(BuildContext context, [Customer? c]) async => await cu
 /// Returns the saved customer, or null if cancelled or failed.
 Future<Customer?> customerForm(BuildContext context, {Customer? c, String? name, String? phone}) async {
   final r = await showFormDialog(context, title: c == null ? 'Add Customer' : 'Edit Customer', fields: [
-    FieldSpec('name', 'Customer Name (optional)', initial: c?.savedName ?? name),
+    FieldSpec('name', 'Customer Name', initial: c?.savedName ?? name),
     FieldSpec('phone', 'Mobile Number', initial: c?.phone ?? phone, keyboard: TextInputType.phone, validator: (v) => v.isEmpty || RegExp(r'^\d{10}$').hasMatch(v) ? null : 'Must be 10 digits'),
     FieldSpec('address', 'Address', initial: c?.address),
     FieldSpec('gstin', 'GSTIN', initial: c?.gstin),
-    FieldSpec('openingBalance', c == null ? 'Opening Balance (Initial)' : 'Opening Balance (At Creation)', initial: '${c?.openingBalance ?? 0}', keyboard: TextInputType.number),
+    // Set only when creating; afterwards bills and payments change the balance.
+    if (c == null) ...const [
+      FieldSpec('openingBalance', 'Opening Balance', initial: '0', keyboard: TextInputType.number),
+      FieldSpec('openingType', 'Opening balance is', options: [('due', 'Due'), ('advance', 'Advance')]),
+    ],
   ]);
   if (r == null || !context.mounted) return null;
   final body = {
@@ -193,7 +221,7 @@ Future<Customer?> customerForm(BuildContext context, {Customer? c, String? name,
     'phone': r['phone']!.isEmpty ? null : r['phone'],
     'address': r['address'],
     'gstin': r['gstin'],
-    'openingBalance': double.tryParse(r['openingBalance']!) ?? 0,
+    if (c == null) 'openingBalance': (double.tryParse(r['openingBalance']!) ?? 0).abs() * (r['openingType'] == 'advance' ? -1 : 1),
   };
   final saved = await guard(context, () => c == null ? Api.instance.post('/customers', body) : Api.instance.put('/customers/${c.id}', body),
       success: c == null ? 'Customer added!' : 'Customer updated!');
@@ -203,6 +231,7 @@ Future<Customer?> customerForm(BuildContext context, {Customer? c, String? name,
 class CustomerDetail extends StatefulWidget {
   final Customer customer;
   final bool openPayment;
+  /// 1 = open the customer's bill history on start.
   final int initialTab;
   const CustomerDetail({super.key, required this.customer, this.openPayment = false, this.initialTab = 0});
   @override
@@ -217,7 +246,8 @@ class _CustomerDetailState extends State<CustomerDetail> {
   @override
   void initState() {
     super.initState();
-    if (widget.openPayment) WidgetsBinding.instance.addPostFrameCallback((_) => _receivePayment());
+    if (widget.openPayment && !c.isArchived) WidgetsBinding.instance.addPostFrameCallback((_) => _receivePayment());
+    if (widget.initialTab == 1) WidgetsBinding.instance.addPostFrameCallback((_) => _bills());
   }
 
   Future<void> _reloadCustomer() async {
@@ -233,9 +263,13 @@ class _CustomerDetailState extends State<CustomerDetail> {
       context: context,
       builder: (d) => StatefulBuilder(
         builder: (d, set) => AlertDialog(
-          title: Text('Receive Payment - ${c.name}'),
+          title: Text('${c.balance > 0 ? 'Receive Payment' : 'Receive Advance'} - ${c.name}'),
           content: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text('Current Closing Balance: ${money(c.balance)}'),
+            Text(c.balance > 0
+                ? 'Due: ${money(c.balance)} – anything above it is kept as advance'
+                : c.advance > 0
+                    ? 'Advance on account: ${money(c.advance)} – this adds to it'
+                    : 'Nothing due – this is kept as advance for future bills'),
             const SizedBox(height: 12),
             TextField(controller: amount, autofocus: true, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Amount Received (₹)')),
             const SizedBox(height: 12),
@@ -257,7 +291,7 @@ class _CustomerDetailState extends State<CustomerDetail> {
     final v = double.tryParse(amount.text);
     if (ok != true || v == null || v <= 0 || !mounted) return;
     final r = await guard(context, () => Api.instance.post('/customers/${c.id}/payments', {'amount': v, 'method': method, 'note': note.text}),
-        success: 'Payment of ${money(v)} recorded via $method');
+        success: v > c.balance ? '${money(v)} received via $method – ${money(v - (c.balance > 0 ? c.balance : 0))} kept as advance' : 'Payment of ${money(v)} recorded via $method');
     if (r == null || !mounted) return;
     final shop = context.read<Session>().shop!;
     final opening = toDouble(r['openingBalance']);
@@ -267,125 +301,272 @@ class _CustomerDetailState extends State<CustomerDetail> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      initialIndex: widget.initialTab,
-      child: Scaffold(
-        appBar: GradientAppBar(
-          title: Text(c.name),
+  /// Give (part of) the advance back to the customer.
+  Future<void> _refundAdvance() async {
+    String method = 'CASH';
+    final amount = TextEditingController(text: c.advance.toStringAsFixed(2));
+    final note = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (d) => StatefulBuilder(
+        builder: (d, set) => AlertDialog(
+          title: Text('Refund Advance - ${c.name}'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('Advance on account: ${money(c.advance)}'),
+            const SizedBox(height: 12),
+            TextField(controller: amount, autofocus: true, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Amount to refund (₹)')),
+            const SizedBox(height: 12),
+            SegmentedButton<String>(
+              segments: const [ButtonSegment(value: 'CASH', label: Text('Cash')), ButtonSegment(value: 'UPI', label: Text('UPI')), ButtonSegment(value: 'CARD', label: Text('Card'))],
+              selected: {method},
+              onSelectionChanged: (s) => set(() => method = s.first),
+            ),
+            const SizedBox(height: 12),
+            TextField(controller: note, decoration: const InputDecoration(labelText: 'Note (optional)')),
+          ]),
           actions: [
-            IconButton(
-              tooltip: 'Edit Customer',
-              onPressed: () async {
-                if (await editCustomer(context, c)) _reloadCustomer();
-              },
-              icon: const Icon(Icons.edit),
-            ),
-            IconButton(
-              tooltip: 'Delete Customer',
-              onPressed: () async {
-                if (await confirm(context, 'Delete Customer', 'Delete ${c.name}? Their bills stay in history.', danger: true, ok: 'Delete') && context.mounted) {
-                  final r = await guard(context, () => Api.instance.delete('/customers/${c.id}'));
-                  if (r != null && context.mounted) Navigator.pop(context);
-                }
-              },
-              icon: const Icon(Icons.delete_outline),
-            ),
+            TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(d, true), child: const Text('Refund')),
           ],
-          bottom: const TabBar(tabs: [Tab(text: 'Ledger'), Tab(text: 'Purchase History')]),
         ),
-        floatingActionButton: FloatingActionButton.extended(onPressed: _receivePayment, icon: const Icon(Icons.payments), label: const Text('Receive Payment')),
-        body: Column(children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Wrap(spacing: 8, runSpacing: 8, children: [
-              SizedBox(width: 200, child: StatTile(label: 'Closing Balance (Live)', value: money(c.balance), icon: Icons.account_balance_wallet, color: c.balance > 0 ? StatusColors.due : StatusColors.ok)),
-              SizedBox(width: 200, child: StatTile(label: 'Opening Balance', value: money(c.openingBalance), icon: Icons.flag_outlined)),
-              SizedBox(width: 200, child: StatTile(label: 'Loyalty Points', value: c.loyaltyPoints.toStringAsFixed(0), icon: Icons.star_outline, color: Colors.amber.shade800)),
-              if (c.phone != null) SizedBox(width: 200, child: StatTile(label: 'Mobile', value: c.phone!, icon: Icons.phone)),
-            ]),
-          ),
-          Expanded(
-            child: TabBarView(children: [
-              Column(children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Row(children: [
-                    Text(_range == null ? 'Since registration' : '${dateOnly(_range!.start)} – ${dateOnly(_range!.end)}'),
-                    const Spacer(),
-                    TextButton.icon(
-                      onPressed: () async {
-                        final r = await showDateRangePicker(context: context, firstDate: DateTime(2020), lastDate: DateTime.now());
-                        setState(() => _range = r);
-                      },
-                      icon: const Icon(Icons.date_range),
-                      label: const Text('Select Dates'),
-                    ),
-                  ]),
-                ),
-                Expanded(
-                  child: Loader<Map<String, dynamic>>(
-                    key: ValueKey('ledger$_v$_range'),
-                    load: () async => Map<String, dynamic>.from(await Api.instance.get('/customers/${c.id}/ledger', {
-                      if (_range != null) 'from': _range!.start.toIso8601String(),
-                      if (_range != null) 'to': DateTime(_range!.end.year, _range!.end.month, _range!.end.day, 23, 59, 59).toIso8601String(),
-                    })),
-                    builder: (context, l, _) {
-                      final entries = List<Map<String, dynamic>>.from(l['entries']);
-                      return ListView(padding: const EdgeInsets.fromLTRB(12, 0, 12, 96), children: [
-                        ListTile(dense: true, title: const Text('OPENING BALANCE', style: TextStyle(fontWeight: FontWeight.w800)), trailing: Text(money(toDouble(l['opening'])))),
-                        for (final e in entries)
-                          Card(
-                            child: ListTile(
-                              dense: true,
-                              onTap: e['billId'] == null
-                                  ? null
-                                  : () async {
-                                      final b = Bill(Map<String, dynamic>.from(await Api.instance.get('/bills/${e['billId']}')));
-                                      if (context.mounted) showBillDetail(context, b, () async => _reloadCustomer());
-                                    },
-                              title: Text('${e['ref']} • ${dateTime(DateTime.parse(e['date']))}'),
-                              subtitle: Text(e['description'] ?? '', maxLines: 2, overflow: TextOverflow.ellipsis),
-                              trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
-                                if (toDouble(e['debit']) > 0) Text('Dr ${money(toDouble(e['debit']))}', style: const TextStyle(color: StatusColors.due)),
-                                if (toDouble(e['credit']) > 0) Text('Cr ${money(toDouble(e['credit']))}', style: const TextStyle(color: StatusColors.ok)),
-                                Text('Bal: ${money(toDouble(e['runningBalance']))}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
-                              ]),
-                            ),
-                          ),
-                        ListTile(
-                          title: const Text('TOTAL / CLOSING', style: TextStyle(fontWeight: FontWeight.w800)),
-                          subtitle: Text('Debit ${money(toDouble(l['totalDebit']))} • Credit ${money(toDouble(l['totalCredit']))}'),
-                          trailing: Text(money(toDouble(l['closing'])), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-                        ),
-                      ]);
-                    },
-                  ),
-                ),
+      ),
+    );
+    final v = double.tryParse(amount.text);
+    if (ok != true || v == null || v <= 0 || !mounted) return;
+    if (v > c.advance + 0.009) return showSnack(context, 'Only ${money(c.advance)} advance is available', error: true);
+    final r = await guard(context, () => Api.instance.post('/customers/${c.id}/refunds', {'amount': v, 'method': method, 'note': note.text}),
+        success: 'Advance of ${money(v)} refunded via $method');
+    if (r == null || !mounted) return;
+    final shop = context.read<Session>().shop!;
+    final opening = toDouble(r['openingBalance']);
+    await _reloadCustomer();
+    if (mounted && await confirm(context, 'Refund Receipt', 'Print a refund receipt?', ok: 'Print')) {
+      await PrintService.printPaymentReceipt(Map<String, dynamic>.from(r['payment']), c, opening, shop);
+    }
+  }
+
+  Future<void> _bills() => showCustomerBillHistory(context, c, onChanged: _reloadCustomer);
+
+  Future<void> _archive() async {
+    if (await archiveCustomer(context, c) && mounted) Navigator.pop(context);
+  }
+
+  Future<void> _restore() async {
+    if (await restoreCustomer(context, c)) _reloadCustomer();
+  }
+
+  /// Summary card: the balance in words (who owes whom), contact line and the payment actions.
+  Widget _summary() {
+    final due = c.balance > 0.009, advance = c.advance > 0.009;
+    final color = due ? StatusColors.due : (advance ? StatusColors.advance : AppColors.navy);
+    final (headline, explain) = due
+        ? ('${c.name} owes you ${money(c.balance)}', 'Collect it with Receive Payment.')
+        : advance
+            ? ('${c.name} has ${money(c.advance)} advance with you', 'You hold this money for the customer – it is used on their next bill, or refund it.')
+            : ('All settled', 'Nothing is due and there is no advance.');
+    return Card(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (c.isArchived)
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+              decoration: BoxDecoration(color: AppColors.amber.withValues(alpha: .2), borderRadius: BorderRadius.circular(10)),
+              child: Row(children: [
+                const Icon(Icons.archive_outlined, size: 18, color: AppColors.navy),
+                const SizedBox(width: 8),
+                const Expanded(child: Text('Archived – hidden from the customer list and search', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                TextButton(onPressed: _restore, child: const Text('Restore')),
               ]),
-              Loader<List<Bill>>(
-                key: ValueKey('bills$_v'),
-                load: () async => (await Api.instance.get('/customers/${c.id}/bills') as List).map((e) => Bill(Map<String, dynamic>.from(e))).toList(),
-                builder: (context, bills, reload) => bills.isEmpty
-                    ? ListView(children: const [SizedBox(height: 40), EmptyState(icon: Icons.receipt_long, title: 'No purchases yet')])
-                    : ListView(padding: const EdgeInsets.fromLTRB(12, 0, 12, 96), children: [
-                        for (final b in bills)
-                          Card(
-                            child: ListTile(
-                              onTap: () => showBillDetail(context, b, reload),
-                              title: Text('#${b.billNo}'),
-                              subtitle: Text('${dateTime(b.billDate)} • ${b.items.length} items${b.isCancelled ? ' • CANCELLED' : ''}'),
-                              trailing: Text(money(b.total), style: const TextStyle(fontWeight: FontWeight.w800)),
-                            ),
-                          ),
-                      ]),
-              ),
+            ),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            IconTile(due ? Icons.call_received_rounded : (advance ? Icons.savings_outlined : Icons.check_circle_outline), color, size: 44),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(headline, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: color)),
+                const SizedBox(height: 2),
+                Text(explain, style: const TextStyle(color: AppColors.muted, fontSize: 13)),
+              ]),
+            ),
+          ]),
+          const SizedBox(height: 12),
+          Wrap(spacing: 14, runSpacing: 6, children: [
+            if (c.phone != null) _info(Icons.phone_outlined, c.phone!),
+            if (c.loyaltyPoints > 0) _info(Icons.star_outline_rounded, '${c.loyaltyPoints.toStringAsFixed(0)} points'),
+            _info(Icons.flag_outlined, 'Opening: ${balanceText(c.openingBalance)}'),
+          ]),
+          // Archived customers can't receive payments – restore them first.
+          if (!c.isArchived) ...[
+            const SizedBox(height: 14),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              FilledButton.icon(onPressed: _receivePayment, icon: const Icon(Icons.payments_outlined), label: Text(due ? 'Receive Payment' : 'Receive Advance')),
+              if (advance) OutlinedButton.icon(onPressed: _refundAdvance, icon: const Icon(Icons.currency_exchange_rounded), label: const Text('Refund Advance')),
             ]),
-          ),
+          ],
         ]),
       ),
     );
   }
+
+  Widget _info(IconData icon, String text) => Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 16, color: AppColors.muted),
+        const SizedBox(width: 4),
+        Text(text, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+      ]);
+
+  /// Balance tag after an entry: "₹250 due" (red), "₹50 advance" (green) or "Settled".
+  Widget _balanceTag(double v) {
+    final color = v > 0.009 ? StatusColors.due : (v < -0.009 ? StatusColors.advance : StatusColors.muted);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(color: color.withValues(alpha: .1), borderRadius: BorderRadius.circular(6)),
+      child: Text(balanceText(v), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
+    );
+  }
+
+  /// One statement row: date, what happened, the amounts in words and the balance afterwards.
+  Widget _entry(Map<String, dynamic> e) {
+    final date = DateTime.parse(e['date']).toLocal();
+    final debit = toDouble(e['debit']), credit = toDouble(e['credit']);
+    final type = e['type'] as String;
+    final (icon, color, title) = switch (type) {
+      'bill' => (Icons.receipt_long_rounded, AppColors.blue, 'Bill'),
+      'refund' => (Icons.currency_exchange_rounded, StatusColors.due, 'Advance refunded'),
+      'return' => (Icons.assignment_return_outlined, StatusColors.ok, 'Return'),
+      _ => (Icons.payments_outlined, StatusColors.ok, 'Payment'),
+    };
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: e['billId'] == null
+            ? null
+            : () async {
+                final b = Bill(Map<String, dynamic>.from(await Api.instance.get('/bills/${e['billId']}')));
+                if (mounted) showBillDetail(context, b, () async => _reloadCustomer());
+              },
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            IconTile(icon, color, size: 36),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text('${dateTime(date)}\n${e['ref']}', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+                if ((e['description'] ?? '').toString().isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(e['description'], maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
+                  ),
+              ]),
+            ),
+            const SizedBox(width: 8),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              if (debit > 0) Text(type == 'refund' ? 'Refunded ${money(debit)}' : 'Billed ${money(debit)}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+              if (credit > 0) Text('Paid ${money(credit)}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: StatusColors.ok)),
+              const SizedBox(height: 4),
+              _balanceTag(toDouble(e['runningBalance'])),
+            ]),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  /// Summary card on top; the account statement (with its own date filter) below; bills via the History button.
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: GradientAppBar(
+        title: Text(c.name),
+        actions: [
+          HistoryButton(tooltip: 'Bills of this customer', onPressed: _bills),
+          PopupMenuButton<String>(
+            tooltip: 'More',
+            onSelected: (v) async {
+              if (v == 'edit' && await editCustomer(context, c)) _reloadCustomer();
+              if (v == 'archive') _archive();
+              if (v == 'restore') _restore();
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit Customer'))),
+              if (c.isArchived)
+                const PopupMenuItem(value: 'restore', child: ListTile(leading: Icon(Icons.unarchive_outlined, color: AppColors.green), title: Text('Restore Customer')))
+              else
+                const PopupMenuItem(value: 'archive', child: ListTile(leading: Icon(Icons.archive_outlined, color: AppColors.danger), title: Text('Archive Customer'))),
+            ],
+          ),
+        ],
+      ),
+      body: Loader<Map<String, dynamic>>(
+        key: ValueKey('ledger$_v$_range'),
+        load: () async => Map<String, dynamic>.from(await Api.instance.get('/customers/${c.id}/ledger', {
+          if (_range != null) 'from': _range!.start.toIso8601String(),
+          if (_range != null) 'to': DateTime(_range!.end.year, _range!.end.month, _range!.end.day, 23, 59, 59).toIso8601String(),
+        })),
+        builder: (context, l, _) {
+          final entries = List<Map<String, dynamic>>.from(l['entries']);
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 820),
+              child: ListView(padding: const EdgeInsets.only(bottom: 24), children: [
+                _summary(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
+                  child: Row(children: [
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        const Text('Account statement', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                        Text(_range == null ? 'Since registration' : '${dateOnly(_range!.start)} – ${dateOnly(_range!.end)}',
+                            style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+                      ]),
+                    ),
+                    if (_range != null) IconButton(tooltip: 'All dates', onPressed: () => setState(() => _range = null), icon: const Icon(Icons.close_rounded)),
+                    TextButton.icon(
+                      onPressed: () async {
+                        final r = await showDateRangePicker(context: context, firstDate: DateTime(2020), lastDate: DateTime.now(), initialDateRange: _range);
+                        if (r != null) setState(() => _range = r);
+                      },
+                      icon: const Icon(Icons.date_range),
+                      label: const Text('Dates'),
+                    ),
+                  ]),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Column(children: [
+                    _statementLine(_range == null ? 'Opening balance' : 'Balance on ${dateOnly(_range!.start)}', toDouble(l['opening'])),
+                    const SizedBox(height: 8),
+                    if (entries.isEmpty)
+                      const Padding(padding: EdgeInsets.all(24), child: Text('No bills or payments in this period', style: TextStyle(color: AppColors.muted)))
+                    else
+                      for (final e in entries) _entry(e),
+                    _statementLine('Balance now', toDouble(l['closing']),
+                        sub: 'Billed ${money(toDouble(l['totalDebit']))} • Paid ${money(toDouble(l['totalCredit']))} in this period', strong: true),
+                  ]),
+                ),
+              ]),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _statementLine(String label, double balance, {String? sub, bool strong = false}) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+        child: Row(children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(label, style: TextStyle(fontWeight: strong ? FontWeight.w800 : FontWeight.w700, fontSize: strong ? 15 : 13)),
+              if (sub != null) Text(sub, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+            ]),
+          ),
+          _balanceTag(balance),
+        ]),
+      );
 }

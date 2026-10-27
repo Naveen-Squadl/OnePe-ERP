@@ -85,6 +85,14 @@ class Cart extends ChangeNotifier {
   String roundMode = 'none';
   /// Record the full amount on the customer's account instead of as paid.
   bool onCredit = false;
+
+  /// Pay (part of) this sale from the customer's advance (their balance below zero).
+  bool useAdvance = false;
+  double get advanceAvailable => isExpense ? 0 : (customer?.advance ?? 0);
+  double get advancePart => useAdvance ? _r2(advanceAvailable < payable ? advanceAvailable : payable) : 0;
+
+  /// What is still to be paid at the counter after the advance.
+  double get toCollect => _r2(payable - advancePart);
   String? note;
   DateTime? billDate;
   bool gstInclusive = false;
@@ -178,6 +186,7 @@ class Cart extends ChangeNotifier {
     customerName = c?.savedName ?? name;
     loyaltyRedeem = 0;
     if (!hasCustomer) onCredit = false;
+    useAdvance = advanceAvailable > 0; // a customer with an advance pays from it by default
     notifyListeners();
   }
 
@@ -205,6 +214,13 @@ class Cart extends ChangeNotifier {
 
   void setOnCredit(bool v) {
     onCredit = v;
+    if (v) useAdvance = false;
+    notifyListeners();
+  }
+
+  void setUseAdvance(bool v) {
+    useAdvance = v && advanceAvailable > 0;
+    if (useAdvance) onCredit = false;
     notifyListeners();
   }
 
@@ -225,6 +241,7 @@ class Cart extends ChangeNotifier {
     loyaltyRedeem = 0;
     roundMode = 'none';
     onCredit = false;
+    useAdvance = false;
     note = null;
     billDate = null;
     billId = null;
@@ -353,6 +370,7 @@ class Cart extends ChangeNotifier {
       giveChange: giveChange,
     );
     final payable = this.payable;
+    final advanceUsed = advancePart;
     try {
       if (!Api.online.value) throw ApiException(0, 'offline');
       final res = await _api.postWithin(checkoutTimeout, '/bills/checkout', payload);
@@ -367,6 +385,7 @@ class Cart extends ChangeNotifier {
         'billNo': billNo ?? 'OFFLINE',
         'totalAmount': payable,
         'roundOff': _r2(payable - total),
+        'advanceUsed': advanceUsed,
         'subtotal': subtotal,
         'totalGst': totalGst,
         'discount': billDiscount,

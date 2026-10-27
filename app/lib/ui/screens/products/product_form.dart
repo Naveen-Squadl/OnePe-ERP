@@ -43,7 +43,6 @@ class _ProductDialogState extends State<_ProductDialog> {
   late String? _location = p?.storageLocation;
   late bool _variable = p?.isPriceVariable ?? false;
   late bool _track = p?.trackStock ?? (context.read<Session>().shop?.has('stock') ?? true);
-  late bool _active = p?.raw['isActive'] != false;
   late bool _igst = p?.raw['isIgst'] == true;
   late String _availability = p == null ? 'all_branches' : (p!.branchScope == 'ALL' ? 'all_branches' : 'specific_branches');
   final Map<String, ({bool enabled, TextEditingController price})> _branchCfg = {};
@@ -89,7 +88,7 @@ class _ProductDialogState extends State<_ProductDialog> {
       'trackStock': _track,
       'lowStockThreshold': double.tryParse(_low.text) ?? 5,
       'storageLocation': _location,
-      'isActive': _active,
+      'isActive': p?.raw['isActive'] != false, // archive / restore happen in the product list
       'availability': _availability,
       'branches': [
         for (final e in _branchCfg.entries) {'branchId': e.key, 'enabled': e.value.enabled, 'price': double.tryParse(e.value.price.text)},
@@ -321,7 +320,6 @@ class _ProductDialogState extends State<_ProductDialog> {
                     ),
                   ],
                 ],
-                if (p != null) SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('Active'), value: _active, onChanged: (v) => setState(() => _active = v)),
                 if (session.branches.length > 1) ...[
                   gap,
                   _section(

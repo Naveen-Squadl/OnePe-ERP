@@ -116,7 +116,7 @@ class _CustomerPickerState extends State<_CustomerPicker> {
                       title: Text(cu.name),
                       subtitle: Text([cu.phone, if (cu.loyaltyPoints > 0) '★ ${cu.loyaltyPoints.toStringAsFixed(0)} pts'].whereType<String>().join(' • ')),
                       trailing: Text(
-                        cu.balance > 0 ? 'Due: ${money(cu.balance)}' : (cu.balance < 0 ? 'Adv: ${money(-cu.balance)}' : 'Balance: ₹0.00'),
+                        balanceText(cu.balance),
                         style: TextStyle(color: cu.balance > 0 ? StatusColors.due : StatusColors.ok, fontWeight: FontWeight.w600),
                       ),
                       onTap: () => Navigator.pop(context, cu),
