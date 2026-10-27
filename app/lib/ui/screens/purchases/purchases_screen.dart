@@ -7,9 +7,11 @@ import '../../../core/theme.dart';
 import '../../../models/models.dart';
 import '../../../state/catalog.dart';
 import '../../../state/session.dart';
+import '../../history_sources.dart';
 import '../../widgets/app_shell.dart';
 import '../../widgets/brand.dart';
 import '../../widgets/common.dart';
+import '../../widgets/history_panel.dart';
 import '../../widgets/scanner.dart';
 import '../suppliers_screen.dart';
 
@@ -28,6 +30,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
     if (ok == true && mounted) {
       setState(() => _v++);
       context.read<Catalog>().load();
+      showSnack(context, 'Purchase saved – received bills are in History (top right)');
     }
   }
 
@@ -118,13 +121,16 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
         body: _list(status),
       );
 
-  /// Purchases: Inwarded | Pending POs | Suppliers.
+  /// Purchases: Pending POs | Suppliers; received purchase bills and supplier payments via the History button.
   @override
   Widget build(BuildContext context) => HubScaffold(
         title: 'Purchases',
         initial: widget.tab,
+        actions: [
+          if (context.watch<Session>().can('purchases.manage'))
+            HistoryButton(tooltip: 'Purchase history', onPressed: () => showPurchaseHistory(context)),
+        ],
         tabs: [
-          HubTab('received', 'Inwarded', (_) => _purchases('RECEIVED'), permissions: const ['purchases.manage']),
           HubTab('pending', 'Pending POs', (_) => _purchases('PENDING'), permissions: const ['purchases.manage']),
           HubTab('suppliers', 'Suppliers', (_) => const SuppliersScreen(), permissions: const ['suppliers.manage']),
         ],

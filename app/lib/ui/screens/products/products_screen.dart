@@ -8,6 +8,7 @@ import '../../../models/models.dart';
 import '../../../services/print_service.dart';
 import '../../../state/catalog.dart';
 import '../../../state/session.dart';
+import '../../history_sources.dart';
 import '../../widgets/app_shell.dart';
 import '../../widgets/brand.dart';
 import '../../widgets/common.dart';
@@ -206,6 +207,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
     final batches = canStock && _has('batches');
     final barcode = _has('barcode');
     final showStock = _has('stock');
+    final history = showStock && _session.can('inventory.view');
     return AppScaffold(
       title: 'Products',
       fab: _canManage && !_stockEntry ? FloatingActionButton.extended(onPressed: () => _open(), icon: const Icon(Icons.add), label: const Text('Add Product')) : null,
@@ -321,6 +323,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                               icon: const Icon(Icons.more_vert_rounded, color: AppColors.navy),
                               onSelected: (v) => switch (v) {
                                 'inward' => _inward(p),
+                                'history' => showStockHistory(context, productId: p.id, productName: p.name),
                                 'print' => _printLabel(p),
                                 'edit' => _open(p),
                                 _ => _delete(p),
@@ -328,6 +331,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
                               itemBuilder: (_) => [
                                 if (batches && p.trackStock)
                                   const PopupMenuItem(value: 'inward', child: ListTile(leading: Icon(Icons.move_to_inbox_rounded, color: AppColors.green), title: Text('Inward Batch'))),
+                                if (history && p.trackStock)
+                                  const PopupMenuItem(value: 'history', child: ListTile(leading: Icon(Icons.history_rounded), title: Text('Stock history'))),
                                 if (barcode) const PopupMenuItem(value: 'print', child: ListTile(leading: Icon(Icons.print), title: Text('Print Barcode'))),
                                 if (_canEdit) const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit, color: AppColors.blue), title: Text('Edit'))),
                                 if (_canManage)
@@ -337,6 +342,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
                           else ...[
                             if (catTag != null) Padding(padding: const EdgeInsets.only(right: 8), child: catTag),
                             if (batches && p.trackStock) RowAction(Icons.move_to_inbox_rounded, AppColors.green, 'Inward Batch (with expiry)', () => _inward(p)),
+                            if (history && p.trackStock)
+                              RowAction(Icons.history_rounded, AppColors.navy, 'Stock history', () => showStockHistory(context, productId: p.id, productName: p.name)),
                             if (barcode) RowAction(Icons.print, AppColors.navy, 'Print Barcode', () => _printLabel(p)),
                             if (_canEdit) RowAction(Icons.edit, AppColors.blue, 'Edit', () => _open(p)),
                             if (_canManage) RowAction(Icons.delete_outline, AppColors.danger, 'Delete', () => _delete(p)),

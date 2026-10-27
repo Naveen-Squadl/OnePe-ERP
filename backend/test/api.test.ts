@@ -296,3 +296,17 @@ test('business type features: defaults, admin switches, enforcement', async () =
   assert.equal(shop.features.kot, false);
   assert.deepEqual([shop.features.purchases, shop.features.credit], [true, false]); // earlier switches kept
 });
+
+test('history panels: dated lists of supplier payments and shop activity', async () => {
+  const today = new Date();
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
+  const end = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59).toISOString();
+
+  const sup = (await api(`/suppliers/payments?from=${start}&to=${end}`, admin)).json;
+  assert.ok(Array.isArray(sup));
+  assert.equal((await api(`/suppliers/payments?from=2000-01-01&to=2000-01-02`, admin)).json.length, 0);
+
+  const activity = (await api(`/shop/activity?from=${start}&to=${end}`, admin)).json;
+  assert.ok(activity.some((a: any) => a.action === 'bill_cancelled'));
+  assert.equal((await api(`/shop/activity?from=2000-01-01&to=2000-01-02`, admin)).json.length, 0);
+});

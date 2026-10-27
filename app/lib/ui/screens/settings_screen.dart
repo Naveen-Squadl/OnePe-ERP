@@ -10,10 +10,12 @@ import '../../services/print_service.dart';
 import '../../services/printer_config.dart';
 import '../../state/catalog.dart';
 import '../../state/session.dart';
+import '../history_sources.dart';
 import '../widgets/app_shell.dart';
 import '../widgets/brand.dart';
 import '../widgets/common.dart';
 import '../widgets/form_dialog.dart';
+import '../widgets/history_panel.dart';
 import 'branches_screen.dart';
 import 'offline_data_tiles.dart';
 import 'printer_settings.dart';
@@ -339,6 +341,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return HubScaffold(
       title: 'Settings',
       initial: widget.tab,
+      actions: [
+        if (session.can('settings.manage')) HistoryButton(tooltip: 'Activity log', onPressed: () => showActivityHistory(context)),
+      ],
       tabs: [
         HubTab('business', 'Business', (_) => _business(), permissions: const ['settings.manage']),
         HubTab('features', 'Features', (_) => _featuresTab(), permissions: const ['settings.manage']),

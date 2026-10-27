@@ -127,36 +127,3 @@ class _StockBatchesViewState extends State<StockBatchesView> {
   static String _expiryLabel(dynamic d) => d == null ? 'No Expiry' : (d as num) < 0 ? 'EXPIRED' : d == 0 ? 'Expires Today' : '$d d left';
   static Color _expiryColor(dynamic d) => d == null ? StatusColors.muted : (d as num) < 0 ? StatusColors.due : d <= 3 ? StatusColors.waiting : StatusColors.ok;
 }
-
-/// Inventory → Stock History (every stock movement).
-class StockHistoryView extends StatelessWidget {
-  const StockHistoryView({super.key});
-
-  @override
-  Widget build(BuildContext context) => _history();
-
-  Widget _history() => Loader<List>(
-        load: () async => await Api.instance.get('/stock/history', {'limit': 300}) as List,
-        builder: (context, list, _) => list.isEmpty
-            ? ListView(children: const [SizedBox(height: 60), EmptyState(icon: Icons.history, title: 'No stock movements yet')])
-            : ListView.separated(
-                padding: const EdgeInsets.all(12),
-                itemCount: list.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
-                itemBuilder: (_, i) {
-                  final m = list[i];
-                  final q = toDouble(m['quantity']);
-                  return ListTile(
-                    dense: true,
-                    leading: Icon(q >= 0 ? Icons.south_west : Icons.north_east, color: q >= 0 ? StatusColors.ok : StatusColors.due),
-                    title: Text('${m['productName']} • ${(m['type'] as String).replaceAll('_', ' ')}'),
-                    subtitle: Text('${dateTime(DateTime.parse(m['createdAt']))}${m['note'] != null ? ' • ${m['note']}' : ''}${m['userName'] != null ? ' • ${m['userName']}' : ''}'),
-                    trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
-                      Text('${q >= 0 ? '+' : ''}${qty(q)}', style: TextStyle(fontWeight: FontWeight.w800, color: q >= 0 ? StatusColors.ok : StatusColors.due)),
-                      Text('Bal ${qty(toDouble(m['balanceAfter']))}', style: const TextStyle(fontSize: 11)),
-                    ]),
-                  );
-                },
-              ),
-      );
-}

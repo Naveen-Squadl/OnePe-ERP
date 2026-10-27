@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { PaymentMethod, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
-import { parse, optStr } from '../lib/validate';
+import { dateRange, parse, optStr } from '../lib/validate';
 import { requireFeature } from '../lib/features';
 import { requirePermission, shopIdOf } from '../middleware/auth';
 import { notFound } from '../lib/errors';
@@ -48,6 +48,19 @@ supplierRouter.delete('/:id', async (req, res) => {
   const s = await own(req);
   await prisma.supplier.delete({ where: { id: s.id } });
   res.json({ ok: true });
+});
+
+/** Supplier payments in a period (Purchases → History). */
+supplierRouter.get('/payments', async (req, res) => {
+  const createdAt = dateRange(req.query);
+  res.json(
+    await prisma.supplierPayment.findMany({
+      where: { shopId: shopIdOf(req), ...(createdAt && { createdAt }) },
+      include: { supplier: { select: { name: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 1000,
+    }),
+  );
 });
 
 supplierRouter.get('/:id/purchases', async (req, res) => {

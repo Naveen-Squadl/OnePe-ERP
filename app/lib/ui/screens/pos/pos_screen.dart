@@ -11,6 +11,7 @@ import '../../../services/offline_queue.dart';
 import '../../../state/cart.dart';
 import '../../../state/catalog.dart';
 import '../../../state/session.dart';
+import '../../history_sources.dart';
 import '../../widgets/app_shell.dart';
 import '../../widgets/brand.dart';
 import '../../widgets/common.dart';
@@ -554,6 +555,10 @@ class _PosHeader extends StatelessWidget {
             child: title,
           )
         : title;
+    // Bills of this outlet (today by default) without leaving the counter.
+    final history = session.can('bills.view')
+        ? IconButton(tooltip: 'Bill history', onPressed: () => showBillHistory(context), style: _glass(), icon: const Icon(Icons.history_rounded, size: 21))
+        : const SizedBox.shrink();
     final sync = ValueListenableBuilder<int>(
       valueListenable: OfflineQueue.pending,
       builder: (_, pending, _) => IconButton(
@@ -609,6 +614,8 @@ class _PosHeader extends StatelessWidget {
               label: const Text('Waiting'),
             ),
             const SizedBox(width: 8),
+            history,
+            const SizedBox(width: 8),
             sync,
             const SizedBox(width: 8),
             profile,
@@ -631,6 +638,8 @@ class _PosHeader extends StatelessWidget {
               const BrandLogo(height: 40, lime: true, iconOnly: true),
               const SizedBox(width: 4),
               Expanded(child: branch),
+              history,
+              const SizedBox(width: 6),
               sync,
               const SizedBox(width: 6),
               profile,

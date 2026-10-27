@@ -118,7 +118,7 @@ user plugs in a phone with USB debugging, run `adb devices`, `adb reverse tcp:40
   can be used directly (`Customer.phoneOnly`, created on sync). Checked: backend 5/5 (pricing + optional-name tests),
   temp live Dart test (instant offline checkout, stock deduction, idle gating, customer cache), APK + web build.
 
-### Done – committed & pushed 2026-10-27 (menu & business types)
+### Done – committed & pushed 2026-10-27 (menu & business types · history panels)
 - **Menu consolidated** (2026-10-26, user-approved plan): 14 drawer items → 7 areas with tabs (`HubScaffold`):
   Inventory = Products (with stock; "Stock entry" mode = old Stock Levels; per-row Inward Batch) | Categories (tap → Products
   filtered) | Batches & Expiry | Stock History; Purchases = Inwarded | Pending POs | Suppliers; Reports = Overview (dashboard) |
@@ -143,6 +143,18 @@ user plugs in a phone with USB debugging, run `adb devices`, `adb reverse tcp:40
   enableLoyaltyPoints → features). Tables and Kitchen screens for restaurants = next step.
   Checked: backend 6/6 (new feature test), analyze clean, temp widget test (settings tabs at 360/1280 px, Services vs
   Restaurant menus/tabs/POS). Dev DB backed up before the migration (scratchpad dump).
+- **History button instead of history sections** (2026-10-27, user request): one shared panel
+  (`widgets/history_panel.dart`: Today · Yesterday · Last 7 days · This month · calendar range, search, grouped by day,
+  PDF export; bottom sheet on phones, right-side panel ≥ 900 px) opened from a 🕘 button at the top of each page
+  (`ui/history_sources.dart`): Inventory → stock movements (+ "Stock history" per product), Purchases → received
+  purchase bills + supplier payments, Customers → payments received, customer details → that customer's bills,
+  Settings → shop activity log (admins), New Bill (POS header) → this outlet's bills, today by default. Removed tabs:
+  Inventory "Stock History", Purchases "Inwarded" (Purchases = Pending POs · Suppliers), customer "Purchase History"
+  (customer details = ledger only). New API: `GET /customers/payments`, `GET /suppliers/payments`, `GET /shop/activity`
+  (settings.manage), `?from=&to=` on `/customers/:id/bills` (`dateRange()` in lib/validate.ts). Bills page keeps its own
+  calendar filter. Checked: backend 7/7 (new history test), analyze clean, temp widget test (panel presets / calendar /
+  search / grouping at 360 + 1280 px, buttons present, removed tabs gone). The API must be restarted after adding
+  routes – `tsx watch` did not pick them up.
 
 ### Environment
 - Mac LAN IP **192.168.0.31** (it was briefly 192.168.29.39 on 2026-10-26) – always check `ipconfig getifaddr en0`.

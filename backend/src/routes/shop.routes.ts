@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { ShopType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
-import { parse, optStr } from '../lib/validate';
+import { dateRange, parse, optStr } from '../lib/validate';
 import { requirePermission, shopIdOf } from '../middleware/auth';
 import { readSettings, shopView, ShopSettingsSchema } from '../services/settings.service';
 import { logActivity } from '../lib/activity';
@@ -13,6 +13,18 @@ export const shopRouter = Router();
 shopRouter.get('/', async (req, res) => {
   const shop = await prisma.shop.findUniqueOrThrow({ where: { id: shopIdOf(req) } });
   res.json(shopView(shop));
+});
+
+/** Shop activity log (Settings → History): who changed settings, cancelled / restored bills … */
+shopRouter.get('/activity', requirePermission('settings.manage'), async (req, res) => {
+  const createdAt = dateRange(req.query);
+  res.json(
+    await prisma.activityLog.findMany({
+      where: { shopId: shopIdOf(req), ...(createdAt && { createdAt }) },
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(Number(req.query.limit ?? 500), 1000),
+    }),
+  );
 });
 
 const ShopUpdate = z.object({
